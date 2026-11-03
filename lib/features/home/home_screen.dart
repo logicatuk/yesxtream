@@ -1159,31 +1159,13 @@ class _BrandLogo extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-        // Signature Purple crest badge with play symbol inside
-        Container(
-          width: 34,
-          height: 34,
-          decoration: BoxDecoration(
-            gradient: const LinearGradient(
-              colors: [Color(0xFF6C5CE7), Color(0xFFA29BFE)],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
-            borderRadius: BorderRadius.circular(8),
-            boxShadow: [
-              BoxShadow(
-                color: const Color(0xFF6C5CE7).withValues(alpha: 0.45),
-                blurRadius: 10,
-                offset: const Offset(0, 2),
-              ),
-            ],
-          ),
-          child: const Center(
-            child: Icon(
-              Icons.play_arrow_rounded,
-              color: Colors.white,
-              size: 24,
-            ),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(8),
+          child: Image.asset(
+            'assets/icon/yestream.png',
+            width: 34,
+            height: 34,
+            fit: BoxFit.cover,
           ),
         ),
         const SizedBox(width: 10),
