@@ -7,13 +7,20 @@ import 'package:media_kit/media_kit.dart';
 import 'package:media_kit/src/player/native/player/real.dart' as native_player;
 import 'package:media_kit_video/media_kit_video.dart';
 
+import 'package:shared_preferences/shared_preferences.dart';
+
 import 'adaptive_buffer.dart';
 import 'stream_proxy.dart';
+import '../../data/services/app_settings.dart';
 import '../../data/services/stream_alternatives_service.dart';
 import '../../data/services/stream_health_tracker.dart';
 
 /// Manages video playback with stream failover support.
 class PlayerService {
+  final Ref? _ref;
+
+  PlayerService([this._ref]);
+
   Player? _player;
   VideoController? _videoController;
   final AdaptiveBufferManager _bufferManager = AdaptiveBufferManager();
@@ -93,19 +100,47 @@ class PlayerService {
       await np.setProperty('af', 'loudnorm=I=-14:TP=-1:LRA=13');
       // Disable SPDIF passthrough which can cause silent output
       await np.setProperty('audio-spdif', '');
+      await np.setProperty('user-agent', 'IPTVSmartersPro/1.0.0 (Linux; Android 12)');
+      await np.setProperty('http-header-fields', 'User-Agent: IPTVSmartersPro/1.0.0 (Linux; Android 12)');
       // Volume
       await np.setProperty('volume', '100');
       await np.setProperty('mute', 'no');
-      // Android TV: enable hardware decoding and optimize buffering
-      if (Platform.isAndroid) {
-        await np.setProperty('hwdec', 'mediacodec-copy');
-        await np.setProperty('vo', 'gpu');
-        await np.setProperty('framedrop', 'vo');
+      // Hardware decoding and buffering
+      final prefs = await SharedPreferences.getInstance();
+      final hwAcc = prefs.getBool('setting_hardware_acc') ?? true;
+      if (hwAcc) {
+        if (Platform.isAndroid) {
+          await np.setProperty('hwdec', 'mediacodec-copy');
+          await np.setProperty('vo', 'gpu');
+          await np.setProperty('framedrop', 'vo');
+        } else if (Platform.isMacOS || Platform.isWindows || Platform.isLinux) {
+          await np.setProperty('hwdec', 'auto-safe');
+        }
+      } else {
+        await np.setProperty('hwdec', 'no');
       }
     }
     await p.setVolume(100);
     _playerReady = true;
     _playerReadyCompleter.complete();
+  }
+
+  /// Update hardware decoding dynamically on the running player instance
+  Future<void> setHardwareAcceleration(bool enabled) async {
+    final np = player.platform;
+    if (np is native_player.NativePlayer) {
+      if (enabled) {
+        if (Platform.isAndroid) {
+          await np.setProperty('hwdec', 'mediacodec-copy');
+          await np.setProperty('vo', 'gpu');
+          await np.setProperty('framedrop', 'vo');
+        } else {
+          await np.setProperty('hwdec', 'auto-safe');
+        }
+      } else {
+        await np.setProperty('hwdec', 'no');
+      }
+    }
   }
 
   /// Wait for player properties to be applied before playback.
@@ -141,10 +176,13 @@ class PlayerService {
     String? originalName,
     List<String>? failoverGroupUrls,
   }) async {
+    final settings = _ref?.read(appSettingsProvider);
+    final effectiveUrl = settings != null ? settings.formatLiveStreamUrl(url) : url;
+
     _isBuffering = false;
     _bufferStartTime = null;
     _consecutiveLowBuffer = 0;
-    _currentUrl = url;
+    _currentUrl = effectiveUrl;
     _currentChannelId = channelId;
     _currentEpgChannelId = epgChannelId;
     _currentTvgId = tvgId;
@@ -158,8 +196,13 @@ class PlayerService {
     _proxyActive = false;
     await _streamProxy.stop();
     await _ensureReady();
-    await player.open(Media(url));
-    await _bufferManager.applyForStream(url, this);
+    await player.open(Media(
+      effectiveUrl,
+      httpHeaders: const {
+        'User-Agent': 'IPTVSmartersPro/1.0.0 (Linux; Android 12)',
+      },
+    ));
+    await _bufferManager.applyForStream(effectiveUrl, this);
     await player.setVolume(100.0);
 
     // Check for missing audio after a brief delay and retry through
@@ -514,7 +557,7 @@ class PlayerService {
 
 /// Riverpod provider for the player service (singleton).
 final playerServiceProvider = Provider<PlayerService>((ref) {
-  final service = PlayerService();
+  final service = PlayerService(ref);
   // Inject failover services
   try {
     final alternatives = ref.read(streamAlternativesProvider);

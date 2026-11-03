@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../core/fuzzy_match.dart';
 import '../../data/datasources/local/database.dart' as db;
+import '../../data/services/app_settings.dart';
 import '../providers/provider_manager.dart';
 
 /// EPG program guide — horizontal timeline grid view.
@@ -150,6 +151,7 @@ class _GuideScreenState extends ConsumerState<GuideScreen> {
   @override
   Widget build(BuildContext context) {
     final database = ref.watch(databaseProvider);
+    final settings = ref.watch(appSettingsProvider);
 
     return KeyboardListener(
       focusNode: _focusNode,
@@ -262,6 +264,7 @@ class _GuideScreenState extends ConsumerState<GuideScreen> {
                         final channel = channels[index];
                         final epgId = _mappingsLoaded ? _resolveEpgId(channel) : null;
                         return _ChannelGuideRow(
+                          channel: channel,
                           channelName: channel.name,
                           channelLogo: channel.tvgLogo,
                           scrollOffset: _scrollOffset,
@@ -269,6 +272,7 @@ class _GuideScreenState extends ConsumerState<GuideScreen> {
                           epgChannelId: epgId,
                           focusDate: _focusTime,
                           pixelsPerMinute: _pixelsPerMinute,
+                          timeShiftHours: settings.epgTimeShiftHours,
                         );
                       },
                     );
@@ -327,6 +331,7 @@ class _TimeRuler extends StatelessWidget {
 }
 
 class _ChannelGuideRow extends StatefulWidget {
+  final db.Channel channel;
   final String channelName;
   final String? channelLogo;
   final ValueNotifier<double> scrollOffset;
@@ -334,8 +339,10 @@ class _ChannelGuideRow extends StatefulWidget {
   final String? epgChannelId;
   final DateTime focusDate;
   final double pixelsPerMinute;
+  final int timeShiftHours;
 
   const _ChannelGuideRow({
+    required this.channel,
     required this.channelName,
     this.channelLogo,
     required this.scrollOffset,
@@ -343,6 +350,7 @@ class _ChannelGuideRow extends StatefulWidget {
     this.epgChannelId,
     required this.focusDate,
     required this.pixelsPerMinute,
+    this.timeShiftHours = 0,
   });
 
   @override
@@ -363,7 +371,8 @@ class _ChannelGuideRowState extends State<_ChannelGuideRow> {
   void didUpdateWidget(covariant _ChannelGuideRow old) {
     super.didUpdateWidget(old);
     if (old.epgChannelId != widget.epgChannelId ||
-        old.focusDate != widget.focusDate) {
+        old.focusDate != widget.focusDate ||
+        old.timeShiftHours != widget.timeShiftHours) {
       _loadProgrammes();
     }
   }
@@ -374,20 +383,27 @@ class _ChannelGuideRowState extends State<_ChannelGuideRow> {
       return;
     }
     setState(() => _loading = true);
+    final shift = Duration(hours: widget.timeShiftHours);
     final dayStart = DateTime(
         widget.focusDate.year, widget.focusDate.month, widget.focusDate.day);
     final dayEnd = dayStart.add(const Duration(hours: 24));
     try {
       final progs = await widget.database.getProgrammes(
         epgChannelId: widget.epgChannelId!,
-        start: dayStart,
-        end: dayEnd,
+        start: dayStart.subtract(shift),
+        end: dayEnd.subtract(shift),
       );
       // Deduplicate — EPG data can have entries from multiple sources
       // with near-identical times. Remove any programme that significantly
       // overlaps (>50% of its duration) with an already-kept programme.
       final unique = <db.EpgProgramme>[];
-      for (final p in progs) {
+      for (final raw in progs) {
+        final p = widget.timeShiftHours == 0
+            ? raw
+            : raw.copyWith(
+                start: raw.start.add(shift),
+                stop: raw.stop.add(shift),
+              );
         final dominated = unique.any((u) {
           final oStart = p.start.isAfter(u.start) ? p.start : u.start;
           final oEnd = p.stop.isBefore(u.stop) ? p.stop : u.stop;
@@ -416,25 +432,28 @@ class _ChannelGuideRowState extends State<_ChannelGuideRow> {
         height: 56,
         child: Row(
           children: [
-            // Channel label
-            SizedBox(
-              width: 120,
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 8),
-                child: Row(
-                  children: [
-                    if (widget.channelLogo != null && widget.channelLogo!.isNotEmpty)
-                      Padding(
-                        padding: const EdgeInsets.only(right: 6),
-                        child: Image.network(widget.channelLogo!, width: 24, height: 24,
-                          errorBuilder: (_, __, ___) => const Icon(Icons.tv, size: 18, color: Colors.white24)),
+            // Channel label (clickable)
+            InkWell(
+              onTap: () => _showProgrammeDetail(null),
+              child: SizedBox(
+                width: 120,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  child: Row(
+                    children: [
+                      if (widget.channelLogo != null && widget.channelLogo!.isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(right: 6),
+                          child: Image.network(widget.channelLogo!, width: 24, height: 24,
+                            errorBuilder: (_, __, ___) => const Icon(Icons.tv, size: 18, color: Colors.white24)),
+                        ),
+                      Expanded(
+                        child: Text(widget.channelName,
+                          style: const TextStyle(fontSize: 11),
+                          maxLines: 2, overflow: TextOverflow.ellipsis),
                       ),
-                    Expanded(
-                      child: Text(widget.channelName,
-                        style: const TextStyle(fontSize: 11),
-                        maxLines: 2, overflow: TextOverflow.ellipsis),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -448,15 +467,18 @@ class _ChannelGuideRowState extends State<_ChannelGuideRow> {
                   child: _loading
                       ? const SizedBox.shrink()
                       : (_programmes == null || _programmes!.isEmpty)
-                          ? Container(
-                              margin: const EdgeInsets.symmetric(vertical: 2),
-                              decoration: BoxDecoration(
-                                color: Colors.white.withValues(alpha: 0.03),
-                                borderRadius: BorderRadius.circular(4),
-                              ),
-                              child: const Center(
-                                child: Text('No EPG data',
-                                  style: TextStyle(fontSize: 10, color: Colors.white24)),
+                          ? InkWell(
+                              onTap: () => _showProgrammeDetail(null),
+                              child: Container(
+                                margin: const EdgeInsets.symmetric(vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withValues(alpha: 0.03),
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: const Center(
+                                  child: Text('Guide unavailable • Tap to watch',
+                                    style: TextStyle(fontSize: 10, color: Colors.white24)),
+                                ),
                               ),
                             )
                           : Stack(
@@ -484,6 +506,101 @@ class _ChannelGuideRowState extends State<_ChannelGuideRow> {
     );
   }
 
+  void _showProgrammeDetail(db.EpgProgramme? prog) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF141322),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Expanded(
+                      child: Text(
+                        prog?.title ?? widget.channelName,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close_rounded, color: Colors.white54),
+                      onPressed: () => Navigator.pop(ctx),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  prog != null
+                      ? '${widget.channelName} • ${_fmtTime(prog.start)} – ${_fmtTime(prog.stop)}'
+                      : '${widget.channelName} • Guide unavailable',
+                  style: const TextStyle(color: Color(0xFFA29BFE), fontSize: 13),
+                ),
+                if (prog?.description != null && prog!.description!.isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  Text(
+                    prog.description!,
+                    style: const TextStyle(color: Colors.white70, fontSize: 13, height: 1.4),
+                    maxLines: 4,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+                const SizedBox(height: 20),
+                Row(
+                  children: [
+                    FilledButton.icon(
+                      onPressed: () {
+                        Navigator.pop(ctx);
+                        context.push('/player', extra: {
+                          'streamUrl': widget.channel.streamUrl,
+                          'channelName': widget.channel.name,
+                          'channelLogo': widget.channel.tvgLogo,
+                          'channels': [
+                            {
+                              'id': widget.channel.id,
+                              'name': widget.channel.name,
+                              'streamUrl': widget.channel.streamUrl,
+                              'tvgLogo': widget.channel.tvgLogo,
+                            }
+                          ],
+                          'currentIndex': 0,
+                        });
+                      },
+                      icon: const Icon(Icons.play_arrow_rounded),
+                      label: const Text('Watch Channel'),
+                      style: FilledButton.styleFrom(backgroundColor: const Color(0xFF6C5CE7)),
+                    ),
+                    const SizedBox(width: 12),
+                    OutlinedButton.icon(
+                      onPressed: null, // Disabled when catch-up unavailable
+                      icon: const Icon(Icons.history_rounded, size: 18),
+                      label: const Text('Catch-up'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: Colors.white38,
+                        side: const BorderSide(color: Colors.white12),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   Widget _buildProgrammeBlock(
       db.EpgProgramme prog, DateTime dayStart, DateTime now, double ppm) {
     final startMin = prog.start.difference(dayStart).inMinutes.toDouble().clamp(0, 24 * 60);
@@ -506,30 +623,30 @@ class _ChannelGuideRowState extends State<_ChannelGuideRow> {
           border: Border.all(color: Colors.white24),
         ),
         padding: const EdgeInsets.all(12),
-        child: MouseRegion(
-          cursor: SystemMouseCursors.click,
+        child: GestureDetector(
+          onTap: () => _showProgrammeDetail(prog),
           child: Container(
-          margin: const EdgeInsets.only(right: 1),
-          padding: const EdgeInsets.symmetric(horizontal: 4),
-          decoration: BoxDecoration(
-            color: isNow
-                ? const Color(0xFF1A237E).withValues(alpha: 0.9)
-                : const Color(0xFF16213E).withValues(alpha: 0.7),
-            borderRadius: BorderRadius.circular(3),
-            border: isNow ? Border.all(color: Colors.blueAccent, width: 1) : null,
-          ),
-          clipBehavior: Clip.hardEdge,
-          alignment: Alignment.centerLeft,
-          child: Text(
-            prog.title,
-            style: TextStyle(
-              fontSize: 10,
-              color: isNow ? Colors.white : Colors.white70,
-              fontWeight: isNow ? FontWeight.bold : FontWeight.normal,
+            margin: const EdgeInsets.only(right: 1),
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            decoration: BoxDecoration(
+              color: isNow
+                  ? const Color(0xFF1A237E).withValues(alpha: 0.9)
+                  : const Color(0xFF16213E).withValues(alpha: 0.7),
+              borderRadius: BorderRadius.circular(3),
+              border: isNow ? Border.all(color: Colors.blueAccent, width: 1) : null,
             ),
-            maxLines: 1, overflow: TextOverflow.ellipsis,
+            clipBehavior: Clip.hardEdge,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              prog.title,
+              style: TextStyle(
+                fontSize: 10,
+                color: isNow ? Colors.white : Colors.white70,
+                fontWeight: isNow ? FontWeight.bold : FontWeight.normal,
+              ),
+              maxLines: 1, overflow: TextOverflow.ellipsis,
+            ),
           ),
-        ),
         ),
       ),
     );

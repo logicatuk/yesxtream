@@ -36,7 +36,19 @@ class AppDatabase extends _$AppDatabase {
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
-        onCreate: (m) => m.createAll(),
+        onCreate: (m) async {
+          await m.createAll();
+        },
+        beforeOpen: (details) async {
+          await customStatement('PRAGMA foreign_keys = ON;');
+          await customStatement('PRAGMA journal_mode = WAL;');
+          await customStatement('PRAGMA synchronous = NORMAL;');
+          await customStatement('CREATE INDEX IF NOT EXISTS idx_channels_provider_stream ON channels(provider_id, stream_type);');
+          await customStatement('CREATE INDEX IF NOT EXISTS idx_channels_group ON channels(provider_id, group_title);');
+          await customStatement('CREATE INDEX IF NOT EXISTS idx_epg_prog_range ON epg_programmes(epg_channel_id, start, stop);');
+          // Purge any orphaned channels from deleted providers
+          await customStatement('DELETE FROM channels WHERE provider_id NOT IN (SELECT id FROM providers);');
+        },
         onUpgrade: (m, from, to) async {
           if (from < 2) {
             await m.createTable(favoriteLists);
@@ -64,22 +76,40 @@ class AppDatabase extends _$AppDatabase {
   Future<void> upsertProvider(ProvidersCompanion entry) =>
       into(providers).insertOnConflictUpdate(entry);
 
-  Future<void> deleteProvider(String id) =>
-      (delete(providers)..where((t) => t.id.equals(id))).go();
+  Future<void> deleteProvider(String id) async {
+    await transaction(() async {
+      await (delete(channels)..where((t) => t.providerId.equals(id))).go();
+      await (delete(providers)..where((t) => t.id.equals(id))).go();
+    });
+  }
 
   // --- Channel queries ---
 
   Future<List<Channel>> getChannelsForProvider(String providerId) =>
       (select(channels)..where((t) => t.providerId.equals(providerId))).get();
 
+  /// Get live channels for a provider (or all providers if null).
+  Future<List<Channel>> getLiveChannels({String? providerId}) {
+    if (providerId != null) {
+      return (select(channels)
+            ..where((t) => t.providerId.equals(providerId) & t.streamType.equals('live'))
+            ..orderBy([(t) => OrderingTerm(expression: t.sortOrder)]))
+          .get();
+    }
+    return (select(channels)
+          ..where((t) => t.streamType.equals('live'))
+          ..orderBy([(t) => OrderingTerm(expression: t.sortOrder)]))
+        .get();
+  }
+
   Future<List<Channel>> getChannelsByIds(Set<String> ids) =>
       (select(channels)..where((t) => t.id.isIn(ids))).get();
 
-  /// Get distinct group names per provider without loading channel objects.
+  /// Get distinct live group names per provider.
   Future<Map<String, List<String>>> getProviderGroups() async {
     final rows = await customSelect(
       'SELECT DISTINCT provider_id, group_title FROM channels '
-      'WHERE group_title IS NOT NULL AND group_title != \'\' '
+      'WHERE stream_type = \'live\' AND group_title IS NOT NULL AND group_title != \'\' '
       'ORDER BY provider_id, group_title',
     ).get();
     final result = <String, List<String>>{};
@@ -87,6 +117,60 @@ class AppDatabase extends _$AppDatabase {
       final pid = row.read<String>('provider_id');
       final g = row.read<String>('group_title');
       (result[pid] ??= []).add(g);
+    }
+    return result;
+  }
+
+  /// Get distinct live groups and channel counts for a provider.
+  Future<Map<String, int>> getLiveGroupCounts({String? providerId}) async {
+    final sql = providerId != null
+        ? 'SELECT group_title, COUNT(*) as cnt FROM channels WHERE provider_id = ? AND stream_type = \'live\' AND group_title IS NOT NULL AND group_title != \'\' GROUP BY group_title ORDER BY group_title'
+        : 'SELECT group_title, COUNT(*) as cnt FROM channels WHERE stream_type = \'live\' AND group_title IS NOT NULL AND group_title != \'\' GROUP BY group_title ORDER BY group_title';
+    final rows = await customSelect(
+      sql,
+      variables: providerId != null ? [Variable.withString(providerId)] : const [],
+    ).get();
+    final result = <String, int>{};
+    for (final row in rows) {
+      final g = row.read<String>('group_title');
+      final c = row.read<int>('cnt');
+      result[g] = c;
+    }
+    return result;
+  }
+
+  /// Get distinct VOD movie groups and counts for a provider.
+  Future<Map<String, int>> getVodGroupCounts({String? providerId}) async {
+    final sql = providerId != null
+        ? 'SELECT group_title, COUNT(*) as cnt FROM channels WHERE provider_id = ? AND stream_type = \'vod\' AND group_title IS NOT NULL AND group_title != \'\' GROUP BY group_title ORDER BY group_title'
+        : 'SELECT group_title, COUNT(*) as cnt FROM channels WHERE stream_type = \'vod\' AND group_title IS NOT NULL AND group_title != \'\' GROUP BY group_title ORDER BY group_title';
+    final rows = await customSelect(
+      sql,
+      variables: providerId != null ? [Variable.withString(providerId)] : const [],
+    ).get();
+    final result = <String, int>{};
+    for (final row in rows) {
+      final g = row.read<String>('group_title');
+      final c = row.read<int>('cnt');
+      result[g] = c;
+    }
+    return result;
+  }
+
+  /// Get distinct Series groups and counts for a provider.
+  Future<Map<String, int>> getSeriesGroupCounts({String? providerId}) async {
+    final sql = providerId != null
+        ? 'SELECT group_title, COUNT(*) as cnt FROM channels WHERE provider_id = ? AND stream_type = \'series\' AND group_title IS NOT NULL AND group_title != \'\' GROUP BY group_title ORDER BY group_title'
+        : 'SELECT group_title, COUNT(*) as cnt FROM channels WHERE stream_type = \'series\' AND group_title IS NOT NULL AND group_title != \'\' GROUP BY group_title ORDER BY group_title';
+    final rows = await customSelect(
+      sql,
+      variables: providerId != null ? [Variable.withString(providerId)] : const [],
+    ).get();
+    final result = <String, int>{};
+    for (final row in rows) {
+      final g = row.read<String>('group_title');
+      final c = row.read<int>('cnt');
+      result[g] = c;
     }
     return result;
   }

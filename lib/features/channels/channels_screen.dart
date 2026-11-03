@@ -19,12 +19,15 @@ import '../../core/platform_info.dart';
 import '../../core/weather_clock_widget.dart';
 import '../../data/datasources/local/database.dart' as db;
 import '../../data/datasources/remote/tmdb_client.dart';
+import '../../data/services/app_settings.dart';
 import '../../data/services/app_update_service.dart';
 import '../../data/services/epg_refresh_service.dart';
 import '../../data/services/stream_alternatives_service.dart';
 import '../player/player_service.dart';
 import '../player/stream_info_badges.dart';
+import '../playlists/playlist_providers.dart';
 import '../providers/provider_manager.dart';
+import '../../data/datasources/remote/xtream_client.dart';
 import '../shows/shows_providers.dart';
 import 'channel_debug_dialog.dart';
 
@@ -43,12 +46,15 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
   List<db.Channel> _allChannels = [];
   List<db.Channel> _filteredChannels = [];
   List<String> _groups = [];
+  Map<String, int> _groupCounts = {};
   String _selectedGroup = 'All';
   String _searchQuery = '';
   // _showSearch removed — search bar is always visible in the top navbar
   int _selectedIndex = -1;
   db.Channel? _previewChannel;
   List<db.EpgProgramme> _nowPlaying = [];
+  final Map<String, List<XtreamEpgEntry>> _liveEpgCache = {};
+  final Set<String> _fetchingEpgChannelIds = {};
 
   /// Maps channel ID → mapped EPG channel ID (from epg_mappings table)
   Map<String, String> _epgMappings = {};
@@ -145,6 +151,12 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
   final Map<String, int> _epgTimeshifts = {};
   static const _kEpgTimeshifts = 'epg_timeshifts';
 
+  int _getEffectiveTimeshift(String? channelId) {
+    final perChannel = (channelId != null ? _epgTimeshifts[channelId] : null) ?? 0;
+    final globalShift = ref.read(appSettingsProvider).epgTimeShiftHours;
+    return perChannel + globalShift;
+  }
+
   // IMDB ID cache: show title → IMDB ID (null = lookup in progress/failed)
   final Map<String, String?> _imdbIdCache = {};
 
@@ -205,8 +217,6 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
     _channelsSub = database.select(database.channels).watch().listen((_) => debouncedReload());
     // Refresh now-playing every 60 seconds so the info panel stays current
     _nowPlayingTimer = Timer.periodic(const Duration(seconds: 60), (_) => _refreshNowPlaying());
-    // Check for app updates after a short delay so the UI loads first
-    Future.delayed(const Duration(seconds: 3), _checkForUpdateOnStartup);
   }
 
   Future<void> _checkForUpdateOnStartup() async {
@@ -304,7 +314,9 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
       if (epgId != null) epgChannelIds.add(epgId);
     }
     if (epgChannelIds.isEmpty) return;
-    final maxShift = _epgTimeshifts.values.fold<int>(0, (m, v) => v.abs() > m ? v.abs() : m);
+    final globalShift = ref.read(appSettingsProvider).epgTimeShiftHours.abs();
+    final localMax = _epgTimeshifts.values.fold<int>(0, (m, v) => v.abs() > m ? v.abs() : m);
+    final maxShift = globalShift > localMax ? globalShift : localMax;
     final now = DateTime.now();
     final nowPlaying = maxShift > 0
         ? await database.getNowPlayingWindow(
@@ -538,6 +550,9 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
 
   @override
   void dispose() {
+    try {
+      ref.read(playerServiceProvider).stop();
+    } catch (_) {}
     _searchController.dispose();
     _searchFocusNode.dispose();
     _sidebarSearchController.dispose();
@@ -563,22 +578,44 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
 
   Future<void> _loadChannels() async {
     final database = ref.read(databaseProvider);
+    final activePlaylist = ref.read(activePlaylistProvider);
     final isFirstLoad = _allChannels.isEmpty;
 
-    // ── Micro-phase 1: providers + favIds (tiny queries) ──
-    if (mounted) setState(() => _loadStatus = 'Loading providers…');
+    if (mounted) setState(() => _loadStatus = 'Loading channels…');
+    String? targetProviderId = activePlaylist?.id;
+    if (targetProviderId == null) {
+      final allProv = await database.getAllProviders();
+      if (allProv.isNotEmpty) {
+        targetProviderId = allProv.first.id;
+      }
+    }
+
     final results = await Future.wait([
       database.getAllProviders(),
       database.getAllFavoriteLists(),
       database.getAllFavoritedChannelIds(),
       SharedPreferences.getInstance(),
+      database.getLiveChannels(providerId: targetProviderId),
+      database.getLiveGroupCounts(providerId: targetProviderId),
+      database.getAllFailoverGroups(),
     ]);
+
     final providers = results[0] as List<db.Provider>;
     final favLists = results[1] as List<db.FavoriteList>;
     final favChannelIds = results[2] as Set<String>;
     final prefs = results[3] as SharedPreferences;
+    final liveChannels = results[4] as List<db.Channel>;
+    final liveGroupCounts = results[5] as Map<String, int>;
+    final foGroups = results[6] as List<db.FailoverGroup>;
 
-    // Vanity names (sync parse from already-loaded prefs)
+    // Auto-repair: if channels exist but have 0 categories due to old import bug, refresh in background
+    if (targetProviderId != null && liveChannels.isNotEmpty && liveGroupCounts.isEmpty) {
+      ref.read(providerManagerProvider).refreshProvider(targetProviderId).then((_) {
+        if (mounted) _loadChannels();
+      }).catchError((_) {});
+    }
+
+    // Vanity names
     final vanityJson = prefs.getString('channel_vanity_names');
     if (vanityJson != null) {
       try {
@@ -587,37 +624,7 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
       } catch (_) {}
     }
 
-    // ── Micro-phase 2: favorite channels (direct ID query, ~18 rows) ──
-    if (mounted) setState(() => _loadStatus = 'Loading ${favChannelIds.length} favorites…');
-    List<db.Channel> favChannels = [];
-    if (favChannelIds.isNotEmpty) {
-      favChannels = await database.getChannelsByIds(favChannelIds);
-    }
-
-    if (!mounted) return;
-    if (mounted) setState(() => _loadStatus = 'Found ${providers.length} providers, ${favChannels.length} favorites');
-    // FIRST RENDER — user sees Favorites immediately
-    setState(() {
-      _initialLoadDone = true;
-      _allChannels = favChannels;
-      _providers = providers;
-      _favoriteLists = favLists;
-      _favoritedChannelIds = favChannelIds;
-      _selectedGroup = 'Favorites';
-      _applyFilters();
-    });
-    if (isFirstLoad) _restoreSession();
-
-    // ── Background: sidebar groups + failover groups (non-blocking) ──
-    if (mounted) setState(() => _loadStatus = 'Loading Smart Channel groups…');
-    final bgResults = await Future.wait([
-      database.getProviderGroups(),
-      database.getAllFailoverGroups(),
-    ]);
-    final pGroups = bgResults[0] as Map<String, List<String>>;
-    final foGroups = bgResults[1] as List<db.FailoverGroup>;
-    final allGroupNames = <String>{};
-    for (final gl in pGroups.values) allGroupNames.addAll(gl);
+    final sortedGroups = liveGroupCounts.keys.toList()..sort();
 
     final foGroupMembers = <int, List<String>>{};
     for (final g in foGroups) {
@@ -628,40 +635,24 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
 
     if (!mounted) return;
     setState(() {
-      _providerGroups = pGroups;
-      _groups = allGroupNames.toList()..sort();
+      _initialLoadDone = true;
+      _allChannels = liveChannels;
+      _providers = providers;
+      _favoriteLists = favLists;
+      _favoritedChannelIds = favChannelIds;
+      _groups = sortedGroups;
+      _groupCounts = liveGroupCounts;
       _failoverGroups = foGroups;
       _failoverGroupMembers = foGroupMembers;
       _failoverGroupIndex = foGroupIndex;
-      _applyFilters(); // Re-filter to hide grouped channels
+      if (_selectedGroup.isEmpty) _selectedGroup = 'All';
+      _applyFilters();
     });
 
-    // ── Background: EPG for favorites ──
-    setState(() => _epgLoading = true);
-    await _loadEpgData(database, favChannels, favChannelIds);
-    if (mounted) setState(() => _epgLoading = false);
+    if (isFirstLoad) _restoreSession();
 
-    // ── Background: load all provider channels incrementally ──
-    _backgroundLoading = true;
-    for (final provider in providers) {
-      if (!mounted) return;
-      final channels = await database.getChannelsForProvider(provider.id);
-      if (!mounted) return;
-      final existingIds = _allChannels.map((c) => c.id).toSet();
-      final newChannels = channels.where((c) => !existingIds.contains(c.id)).toList();
-      _loadedProviders.add(provider.id);
-      setState(() {
-        _allChannels = [..._allChannels, ...newChannels];
-        if (_selectedGroup == 'All' || _selectedGroup == 'provider:${provider.id}' ||
-            _selectedGroup.startsWith('provgroup:${provider.id}:')) {
-          _applyFilters();
-        }
-      });
-    }
-    _backgroundLoading = false;
-
-    // Re-index EPG with full channel set
-    if (mounted) _loadEpgData(database, _allChannels, favChannelIds);
+    // EPG indexing
+    _loadEpgData(database, liveChannels, favChannelIds);
   }
 
   /// On-demand: load a single provider's channels into _allChannels.
@@ -948,16 +939,105 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
     _refreshNowPlaying();
   }
 
-  void _selectChannel(int index) {
+  Future<void> _fetchLiveEpgForChannel(db.Channel channel) async {
+    if (_liveEpgCache.containsKey(channel.id) || _fetchingEpgChannelIds.contains(channel.id)) return;
+    _fetchingEpgChannelIds.add(channel.id);
+
+    try {
+      final dbInstance = ref.read(databaseProvider);
+      final provider = await (dbInstance.select(dbInstance.providers)
+            ..where((t) => t.id.equals(channel.providerId)))
+          .getSingleOrNull();
+
+      String? baseUrl;
+      String? username;
+      String? password;
+      String? streamId;
+
+      if (provider != null && provider.type == 'xtream' && provider.url != null) {
+        baseUrl = provider.url;
+        username = provider.username;
+        password = provider.password;
+      } else if (provider?.url != null) {
+        final parsed = parseXtreamFromM3uUrl(provider!.url!);
+        if (parsed != null) {
+          baseUrl = parsed.baseUrl;
+          username = parsed.username;
+          password = parsed.password;
+        }
+      }
+
+      if (baseUrl == null) {
+        final uri = Uri.tryParse(channel.streamUrl);
+        if (uri != null && uri.pathSegments.length >= 3) {
+          final segs = uri.pathSegments;
+          baseUrl = '${uri.scheme}://${uri.host}${uri.hasPort ? ':${uri.port}' : ''}';
+          username = segs[segs.length - 3];
+          password = segs[segs.length - 2];
+        }
+      }
+
+      if (channel.id.contains('_')) {
+        streamId = channel.id.split('_').last;
+      } else {
+        final uri = Uri.tryParse(channel.streamUrl);
+        if (uri != null && uri.pathSegments.isNotEmpty) {
+          streamId = uri.pathSegments.last.split('.').first;
+        }
+      }
+
+      if (baseUrl != null && username != null && password != null && streamId != null && streamId.isNotEmpty) {
+        final client = XtreamClient(
+          baseUrl: baseUrl,
+          username: username,
+          password: password,
+        );
+        final entries = await client.getSimpleDataTable(streamId);
+        client.dispose();
+        if (mounted && entries.isNotEmpty) {
+          setState(() {
+            _liveEpgCache[channel.id] = entries;
+          });
+        }
+      }
+    } catch (_) {} finally {
+      _fetchingEpgChannelIds.remove(channel.id);
+    }
+  }
+
+  void _selectChannel(int index, {bool forcePlay = false}) {
     if (index < 0 || index >= _filteredChannels.length) return;
-    // Skip if already selected — don't reload the stream
-    if (index == _selectedIndex) return;
+    final channel = _filteredChannels[index];
+    final isSameChannel = index == _selectedIndex;
+
+    setState(() {
+      _selectedIndex = index;
+      _previewChannel = channel;
+    });
+    _fetchLiveEpgForChannel(channel);
+
+    final autoPreview = ref.read(appSettingsProvider).autoPreview;
+    final shouldPlay = forcePlay || autoPreview;
+
+    if (!shouldPlay && !isSameChannel) {
+      // Show channel details without starting a new stream
+      _showInfoOverlay(channel, index);
+      _saveSession();
+      return;
+    }
+
+    final playerService = ref.read(playerServiceProvider);
+
+    // If already playing this channel and user presses OK / taps again, go fullscreen
+    if (isSameChannel && !forcePlay && playerService.player.state.playing) {
+      _goFullscreen(channel);
+      return;
+    }
+
     // Remember current as previous (for back/forth toggle)
     if (_selectedIndex >= 0 && _selectedIndex != index) {
       _previousIndex = _selectedIndex;
     }
-    final channel = _filteredChannels[index];
-    final playerService = ref.read(playerServiceProvider);
 
     // Check if channel belongs to a failover group → pass group URLs
     final groupMemberships = _failoverGroupIndex[channel.id];
@@ -985,10 +1065,6 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
       originalName: channel.tvgName,
       failoverGroupUrls: failoverUrls,
     );
-    setState(() {
-      _selectedIndex = index;
-      _previewChannel = channel;
-    });
     _showInfoOverlay(channel, index);
     _saveSession();
   }
@@ -1131,7 +1207,7 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
   db.EpgProgramme? _getEpgProgramme(db.Channel channel) {
     final epgId = _getEpgId(channel);
     if (epgId == null) return null;
-    final shift = _epgTimeshifts[channel.id] ?? 0;
+    final shift = _getEffectiveTimeshift(channel.id);
     final adjusted = DateTime.now().subtract(Duration(hours: shift));
     final matches = _nowPlaying.where((p) =>
         p.epgChannelId == epgId &&
@@ -1342,6 +1418,12 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    ref.listen<db.Provider?>(activePlaylistProvider, (prev, next) {
+      if (prev?.id != next?.id) {
+        _loadChannels();
+      }
+    });
+
     if (!_initialLoadDone) {
       return Scaffold(
         backgroundColor: const Color(0xFF0A0A1A),
@@ -1349,10 +1431,10 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Image.asset('assets/icon/clubtivi-icon.png', width: 80, height: 80,
+              Image.asset('assets/icon/yestream.png', width: 80, height: 80,
                 errorBuilder: (_, __, ___) => const Icon(Icons.tv, size: 64, color: Color(0xFF6C5CE7))),
               const SizedBox(height: 12),
-              const Text('clubTivi', style: TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold)),
+              const Text('YesXtream', style: TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold)),
               const SizedBox(height: 20),
               const SizedBox(
                 width: 32, height: 32,
@@ -1396,53 +1478,44 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
           child: Scaffold(
             backgroundColor: const Color(0xFF1A1A2E),
             body: SafeArea(
-              child: Column(
+              child: Row(
                 children: [
-                  if (!Platform.isAndroid) // TV: no top bar, use sidebar for nav
-                  MouseRegion(
-                    onEnter: (_) {
-                      _mouseInTopBar = true;
-                      _topBarTimer?.cancel();
-                      setState(() => _topBarOpacity = 1.0);
-                    },
-                    onExit: (_) {
-                      _mouseInTopBar = false;
-                      _startTopBarFade();
-                    },
-                    child: AnimatedOpacity(
-                      opacity: _topBarOpacity,
-                      duration: const Duration(milliseconds: 600),
-                      child: _buildTopBar(context),
+                  // Column 1: Categories (30%)
+                  _sidebarExpanded
+                      ? Expanded(flex: 3, child: _buildSidebar())
+                      : SizedBox(width: 44, child: _buildSidebar()),
+
+                  // Column 2: Channels List (30%)
+                  Expanded(
+                    flex: _sidebarExpanded ? 3 : 5,
+                    child: Stack(
+                      children: [
+                        _buildChannelList(),
+                        if (_showFailoverBanner && _failoverSuggestion != null)
+                          Positioned(
+                            top: 0, left: 0, right: 0,
+                            child: _buildFailoverBanner(),
+                          ),
+                        if (_multiSelectMode)
+                          Positioned(
+                            left: 8, right: 8, bottom: 8,
+                            child: _buildMultiSelectBar(),
+                          ),
+                      ],
                     ),
                   ),
+
+                  // Column 3: Live Preview Panel (40%)
                   Expanded(
-                    child: Row(
-                      children: [
-                        // Collapsible sidebar tree
-                        _buildSidebar(),
-                        // Main content area
-                        Expanded(
-                          child: Column(
-                            children: [
-                              _buildPreviewRow(),
-                              if (_showFailoverBanner && _failoverSuggestion != null)
-                                _buildFailoverBanner(),
-                              Expanded(
-                                child: Stack(
-                                  children: [
-                                    _showGuideView ? _buildGuideView() : _buildChannelList(),
-                                    if (_multiSelectMode)
-                                      Positioned(
-                                        left: 8, right: 8, bottom: 8,
-                                        child: _buildMultiSelectBar(),
-                                      ),
-                                  ],
-                                ),
-                              ),
-                            ],
-                          ),
+                    flex: _sidebarExpanded ? 4 : 5,
+                    child: Container(
+                      decoration: const BoxDecoration(
+                        color: Color(0xFF10101C),
+                        border: Border(
+                          left: BorderSide(color: Color(0xFF1E1E2E), width: 1),
                         ),
-                      ],
+                      ),
+                      child: _buildThreeColumnPreviewPanel(),
                     ),
                   ),
                 ],
@@ -1502,12 +1575,12 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       child: Row(
         children: [
-          Text(
-            'clubTivi',
+          const Text(
+            'Live TV',
             style: TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.w500,
-              color: Colors.white.withValues(alpha: 0.4),
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+              color: Colors.white,
             ),
           ),
           const SizedBox(width: 16),
@@ -1574,7 +1647,9 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
                     child: Material(
                       elevation: 8,
                       color: const Color(0xFF1A1A2E),
-                      borderRadius: BorderRadius.circular(8),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
                       child: ConstrainedBox(
                         constraints: const BoxConstraints(maxHeight: 240, maxWidth: 400),
                         child: ListView.builder(
@@ -1642,6 +1717,436 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
           ),
           const Spacer(),
           const WeatherClockWidget(),
+        ],
+      ),
+    );
+  }
+
+  /// Right column: Preview panel in 3-column Live TV browser.
+  Widget _buildThreeColumnPreviewPanel() {
+    final playerService = ref.watch(playerServiceProvider);
+    final channel = _previewChannel ?? (_filteredChannels.isNotEmpty ? _filteredChannels.first : null);
+
+    if (channel != null && !_liveEpgCache.containsKey(channel.id) && !_fetchingEpgChannelIds.contains(channel.id)) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _fetchLiveEpgForChannel(channel);
+      });
+    }
+
+    final programme = channel != null ? _getEpgProgramme(channel) : null;
+    final nextProg = channel != null ? _getNextProgramme(channel) : null;
+    final xtreamEntries = channel != null ? (_liveEpgCache[channel.id] ?? []) : <XtreamEpgEntry>[];
+
+    XtreamEpgEntry? currentLiveEntry;
+    List<XtreamEpgEntry> upcomingEntries = [];
+
+    if (xtreamEntries.isNotEmpty) {
+      final now = DateTime.now();
+      currentLiveEntry = xtreamEntries.where((e) =>
+          e.start != null && e.end != null && !e.start!.isAfter(now) && e.end!.isAfter(now)
+      ).firstOrNull ?? xtreamEntries.first;
+
+      upcomingEntries = xtreamEntries.where((e) => e != currentLiveEntry).take(6).toList();
+    }
+
+    final liveTitle = currentLiveEntry?.title.isNotEmpty == true
+        ? currentLiveEntry!.title
+        : (programme?.title ?? 'Live broadcast');
+    final liveTime = currentLiveEntry != null && currentLiveEntry.start != null && currentLiveEntry.end != null
+        ? '${_formatTime(currentLiveEntry.start!)} - ${_formatTime(currentLiveEntry.end!)}'
+        : (programme != null ? _programmeTimeRange(programme, timeshiftHours: _getEffectiveTimeshift(channel?.id)) : null);
+    final liveDesc = currentLiveEntry?.description.isNotEmpty == true
+        ? currentLiveEntry!.description
+        : programme?.description;
+
+    if (channel == null) {
+      return const Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.tv_rounded, size: 56, color: Colors.white24),
+            SizedBox(height: 12),
+            Text('Select a channel to preview',
+                style: TextStyle(color: Colors.white38, fontSize: 14)),
+          ],
+        ),
+      );
+    }
+
+    final isFavorited = _favoritedChannelIds.contains(channel.id);
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // ── Video Preview (16:9) ──
+          AspectRatio(
+            aspectRatio: 16 / 9,
+            child: Container(
+              decoration: BoxDecoration(
+                color: Colors.black,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: const Color(0xFF26243A)),
+              ),
+              clipBehavior: Clip.antiAlias,
+              child: GestureDetector(
+                onTap: () => _goFullscreen(channel),
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    Video(
+                      controller: playerService.videoController,
+                      controls: NoVideoControls,
+                    ),
+                    Positioned(
+                      top: 8,
+                      right: 8,
+                      child: Container(
+                        padding: const EdgeInsets.all(4),
+                        decoration: BoxDecoration(
+                          color: Colors.black54,
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: const Icon(Icons.fullscreen_rounded,
+                            size: 18, color: Colors.white70),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+
+          const SizedBox(height: 16),
+
+          // ── Channel Header (Name, logo, badges) ──
+          Row(
+            children: [
+              if (channel.tvgLogo != null && channel.tvgLogo!.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(right: 10),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(6),
+                    child: Image.network(
+                      channel.tvgLogo!,
+                      width: 32,
+                      height: 32,
+                      fit: BoxFit.contain,
+                      errorBuilder: (_, __, ___) => const Icon(
+                        Icons.live_tv_rounded,
+                        color: Color(0xFF6C5CE7),
+                        size: 28,
+                      ),
+                    ),
+                  ),
+                ),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Flexible(
+                          child: Text(
+                            _channelDisplayName(channel),
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 16,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        if (_qualityBadge(channel.name) != null) ...[
+                          const SizedBox(width: 6),
+                          _qualityBadge(channel.name)!,
+                        ],
+                      ],
+                    ),
+                    if (channel.groupTitle != null &&
+                        channel.groupTitle!.isNotEmpty)
+                      Text(
+                        channel.groupTitle!,
+                        style: const TextStyle(color: Colors.white38, fontSize: 12),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 16),
+          const Divider(color: Color(0xFF1E1E2E), height: 1),
+          const SizedBox(height: 16),
+
+          // ── Now Playing ──
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: Colors.cyanAccent.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: const Text(
+                  'NOW',
+                  style: TextStyle(
+                    color: Colors.cyanAccent,
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      liveTitle,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w600,
+                        fontSize: 14,
+                      ),
+                    ),
+                    if (liveTime != null && liveTime.isNotEmpty) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        liveTime,
+                        style: const TextStyle(color: Colors.white38, fontSize: 12),
+                      ),
+                    ],
+                    if (liveDesc != null && liveDesc.isNotEmpty) ...[
+                      const SizedBox(height: 6),
+                      Text(
+                        liveDesc,
+                        style: const TextStyle(color: Colors.white60, fontSize: 12),
+                        maxLines: 3,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ],
+          ),
+
+          // ── Upcoming Schedule (IBO Player Pro Style) ──
+          if (upcomingEntries.isNotEmpty) ...[
+            const SizedBox(height: 16),
+            const Row(
+              children: [
+                Icon(Icons.calendar_month_rounded, size: 14, color: Colors.white54),
+                SizedBox(width: 6),
+                Text(
+                  'UPCOMING SCHEDULE',
+                  style: TextStyle(
+                    color: Colors.white54,
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 0.8,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            ...upcomingEntries.map((entry) {
+              final startStr = entry.start != null ? _formatTime(entry.start!) : '';
+              final endStr = entry.end != null ? _formatTime(entry.end!) : '';
+              final timeStr = startStr.isNotEmpty && endStr.isNotEmpty ? '$startStr ~ $endStr' : startStr;
+
+              return Container(
+                margin: const EdgeInsets.only(bottom: 8),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF161528),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: const Color(0xFF26243A)),
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          if (timeStr.isNotEmpty)
+                            Text(
+                              timeStr,
+                              style: const TextStyle(
+                                color: Color(0xFFFFB800),
+                                fontSize: 11,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          const SizedBox(height: 2),
+                          Text(
+                            entry.title,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w500,
+                            ),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ],
+                      ),
+                    ),
+                    if (entry.hasArchive) ...[
+                      const SizedBox(width: 8),
+                      Tooltip(
+                        message: 'Catch-up available',
+                        child: Container(
+                          padding: const EdgeInsets.all(4),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF6C5CE7).withValues(alpha: 0.2),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: const Icon(Icons.replay_rounded, size: 14, color: Color(0xFF6C5CE7)),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              );
+            }),
+          ] else if (nextProg != null) ...[
+            const SizedBox(height: 14),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: const Text(
+                    'NEXT',
+                    style: TextStyle(
+                      color: Colors.white60,
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        nextProg.title,
+                        style: const TextStyle(
+                          color: Colors.white70,
+                          fontSize: 13,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        _programmeTimeRange(nextProg,
+                                timeshiftHours: _getEffectiveTimeshift(channel.id)) ??
+                            '',
+                        style: const TextStyle(color: Colors.white38, fontSize: 11),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ],
+
+          const SizedBox(height: 24),
+
+          // ── Action Buttons (Replay, Favorite, Search) ──
+          Row(
+            children: [
+              Expanded(
+                child: FilledButton.icon(
+                  onPressed: () => context.go('/catchup', extra: channel),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFF6C5CE7),
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                  icon: const Icon(Icons.replay_rounded, size: 16),
+                  label: const Text(
+                    'Replay',
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: FilledButton.icon(
+                  onPressed: () async {
+                    final newFav = !isFavorited;
+                    final dbInstance = ref.read(databaseProvider);
+                    await (dbInstance.update(dbInstance.channels)
+                          ..where((t) => t.id.equals(channel.id)))
+                        .write(db.ChannelsCompanion(
+                      favorite: Value(newFav),
+                    ));
+                    setState(() {
+                      if (newFav) {
+                        _favoritedChannelIds.add(channel.id);
+                      } else {
+                        _favoritedChannelIds.remove(channel.id);
+                      }
+                    });
+                  },
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFF6C5CE7),
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                  icon: Icon(
+                    isFavorited ? Icons.star_rounded : Icons.star_outline_rounded,
+                    size: 16,
+                    color: isFavorited ? const Color(0xFFFFD32A) : Colors.white,
+                  ),
+                  label: Text(
+                    isFavorited ? 'Favorited' : 'Favorite',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                      color: isFavorited ? const Color(0xFFFFD32A) : Colors.white,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: FilledButton.icon(
+                  onPressed: () => context.go('/search'),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFF6C5CE7),
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                  icon: const Icon(Icons.search_rounded, size: 16),
+                  label: const Text(
+                    'Search',
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ),
+            ],
+          ),
         ],
       ),
     );
@@ -1804,7 +2309,7 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
                               ],
                             ),
                             Text(
-                              _programmeTimeRange(programme, timeshiftHours: _epgTimeshifts[_previewChannel!.id] ?? 0) ?? '',
+                              _programmeTimeRange(programme, timeshiftHours: _getEffectiveTimeshift(_previewChannel!.id)) ?? '',
                               style: const TextStyle(color: Colors.white38, fontSize: 11),
                             ),
                           ],
@@ -1852,7 +2357,7 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
                                   const Text('Next: ', style: TextStyle(color: Colors.white38, fontSize: 11)),
                                   Expanded(
                                     child: Text(
-                                      '${nextProg.title}  ${_programmeTimeRange(nextProg, timeshiftHours: _epgTimeshifts[_previewChannel!.id] ?? 0) ?? ''}',
+                                      '${nextProg.title}  ${_programmeTimeRange(nextProg, timeshiftHours: _getEffectiveTimeshift(_previewChannel!.id)) ?? ''}',
                                       style: const TextStyle(color: Colors.white54, fontSize: 11),
                                       overflow: TextOverflow.ellipsis,
                                     ),
@@ -1982,12 +2487,15 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
   }
 
   Widget _buildSidebar() {
-    final width = _sidebarExpanded ? 220.0 : 44.0;
+    final width = _sidebarExpanded ? double.infinity : 44.0;
     return AnimatedContainer(
       duration: const Duration(milliseconds: 200),
       width: width,
       clipBehavior: Clip.hardEdge,
-      decoration: const BoxDecoration(color: Color(0xFF111127)),
+      decoration: const BoxDecoration(
+        color: Color(0xFF0E0D1B),
+        border: Border(right: BorderSide(color: Color(0xFF1E1D2F), width: 1)),
+      ),
       child: FocusScope(
         node: _sidebarFocusNode,
         child: Column(
@@ -2007,49 +2515,47 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
             ),
           ),
           if (_sidebarExpanded) ...[
-            // Search field — only on iOS (Android TV uses D-pad nav, desktop uses top bar)
-            if (Platform.isIOS) ...[
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                child: SizedBox(
-                  height: 30,
-                  child: TextFormField(
-                    controller: _sidebarSearchController,
-                    style: const TextStyle(color: Colors.white, fontSize: 12),
-                    decoration: InputDecoration(
-                      hintText: 'Search channels…',
-                      hintStyle: const TextStyle(color: Colors.white24, fontSize: 12),
-                      prefixIcon: const Icon(Icons.search_rounded, size: 14, color: Colors.white24),
-                      prefixIconConstraints: const BoxConstraints(minWidth: 30),
-                      suffixIcon: _sidebarSearchQuery.isNotEmpty
-                          ? GestureDetector(
-                              onTap: () {
-                                _sidebarSearchController.clear();
-                                setState(() => _sidebarSearchQuery = '');
-                              },
-                              child: const Icon(Icons.close_rounded, size: 14, color: Colors.white24),
-                            )
-                          : null,
-                      suffixIconConstraints: const BoxConstraints(minWidth: 30),
-                      filled: true,
-                      fillColor: Colors.white.withValues(alpha: 0.06),
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 8),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(6),
-                        borderSide: BorderSide.none,
-                      ),
+            // Search field in sidebar
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              child: SizedBox(
+                height: 32,
+                child: TextFormField(
+                  controller: _sidebarSearchController,
+                  style: const TextStyle(color: Colors.white, fontSize: 12),
+                  decoration: InputDecoration(
+                    hintText: 'Search categories…',
+                    hintStyle: const TextStyle(color: Colors.white24, fontSize: 12),
+                    prefixIcon: const Icon(Icons.search_rounded, size: 14, color: Colors.white24),
+                    prefixIconConstraints: const BoxConstraints(minWidth: 30),
+                    suffixIcon: _sidebarSearchQuery.isNotEmpty
+                        ? GestureDetector(
+                            onTap: () {
+                              _sidebarSearchController.clear();
+                              setState(() => _sidebarSearchQuery = '');
+                            },
+                            child: const Icon(Icons.close_rounded, size: 14, color: Colors.white24),
+                          )
+                        : null,
+                    suffixIconConstraints: const BoxConstraints(minWidth: 30),
+                    filled: true,
+                    fillColor: Colors.white.withValues(alpha: 0.06),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 8),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(6),
+                      borderSide: BorderSide.none,
                     ),
-                    onChanged: (v) {
-                      setState(() {
-                        _sidebarSearchQuery = v.toLowerCase();
-                        _applyFilters();
-                      });
-                    },
                   ),
+                  onChanged: (v) {
+                    setState(() {
+                      _sidebarSearchQuery = v.toLowerCase();
+                      _applyFilters();
+                    });
+                  },
                 ),
               ),
-              const Divider(height: 1, color: Colors.white10),
-            ],
+            ),
+            const Divider(height: 1, color: Colors.white10),
           ],
           // Tree content
           Expanded(
@@ -2070,7 +2576,7 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
             child: Text(
-              _sidebarExpanded ? 'clubTivi v${AppUpdateService.currentVersion}' : 'v${AppUpdateService.currentVersion}',
+              _sidebarExpanded ? 'YesXtream v${AppUpdateService.currentVersion}' : 'v${AppUpdateService.currentVersion}',
               style: const TextStyle(
                 fontSize: 10,
                 color: Colors.white24,
@@ -2189,65 +2695,114 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
   }
 
   Widget _buildSidebarTree() {
-    final q = _sidebarSearchQuery;
+    final q = _sidebarSearchQuery.trim().toLowerCase();
+    final allCount = _allChannels.length;
+    final favCount = _favoritedChannelIds.length;
+
     final filteredGroups = q.isEmpty
         ? _groups
         : _groups.where((g) => g.toLowerCase().contains(q)).toList();
-    final filteredFavs = q.isEmpty
-        ? _favoriteLists
-        : _favoriteLists.where((l) => l.name.toLowerCase().contains(q)).toList();
-    final filteredProviders = q.isEmpty
-        ? _providers
-        : _providers.where((p) => p.name.toLowerCase().contains(q)).toList();
-    final showAll = q.isEmpty || 'all'.contains(q);
-    final showFavSection = q.isEmpty || filteredFavs.isNotEmpty || 'favorites'.contains(q);
-    final showProvSection = q.isEmpty || filteredProviders.isNotEmpty || 'providers'.contains(q);
 
     return ListView(
-      padding: const EdgeInsets.symmetric(vertical: 4),
+      padding: EdgeInsets.zero,
       children: [
-        if (showAll)
-          _buildTreeItem('All (${_allChannels.length})', 'All', Icons.grid_view_rounded, indent: 0, focusNode: _sidebarAllItemFocusNode),
-        if (showFavSection)
-          _buildTreeSection(
-            'favorites',
-            Icons.star_rounded,
-            'Favorites',
-            [
-              if (q.isEmpty || 'favorites'.contains(q))
-                _buildTreeItem('All Favorites', 'Favorites', Icons.star_rounded, indent: 1),
-              for (final list in filteredFavs)
-                _buildTreeItem(list.name, 'fav:${list.id}', Icons.star_outline_rounded, indent: 1,
-                    onSecondaryTap: () => _renameFavoriteList(list)),
-              if (q.isEmpty)
-                _buildTreeAction('New List…', Icons.add_rounded, () => _showManageFavoritesDialog(), indent: 1),
-            ],
+        // 1. Favorites
+        if (q.isEmpty || 'favorites'.contains(q) || 'favoris'.contains(q))
+          _buildCategoryRow(
+            title: 'Favorites',
+            filterKey: 'Favorites',
+            count: favCount,
+            icon: Icons.star_rounded,
           ),
-        if (showFavSection || showProvSection)
-          const Divider(height: 1, color: Colors.white10),
-        if (showProvSection)
-          ..._buildProviderTrees(filteredProviders, q),
-        if (showProvSection || filteredGroups.isNotEmpty)
-          const Divider(height: 1, color: Colors.white10),
-        if (filteredGroups.isNotEmpty)
-          _buildTreeSection(
-            'groups',
-            Icons.folder_rounded,
-            'Groups (${filteredGroups.length})',
-            [
-              for (final group in filteredGroups)
-                _buildTreeItem(group, group, null, indent: 1),
-            ],
+
+        // 2. All Channels
+        if (q.isEmpty || 'all'.contains(q) || 'tout'.contains(q))
+          _buildCategoryRow(
+            title: 'All',
+            filterKey: 'All',
+            count: allCount,
+            icon: Icons.grid_view_rounded,
+            focusNode: _sidebarAllItemFocusNode,
           ),
-        // Shows & Movies
-        const Divider(height: 1, color: Colors.white10),
-        _buildTreeItem('Shows & Movies', 'action:shows', Icons.movie_rounded, indent: 0),
-        // Quick actions
-        const Divider(height: 1, color: Colors.white10),
-        _buildTreeItem('Recordings', 'action:recordings', Icons.videocam_rounded, indent: 0),
-        _buildTreeItem('Play File', 'action:play_file', Icons.play_circle_outline_rounded, indent: 0),
-        _buildTreeItem('Play URL', 'action:play_url', Icons.link_rounded, indent: 0),
+
+        // 3. Category Groups (from IPTV provider)
+        for (final group in filteredGroups)
+          _buildCategoryRow(
+            title: group,
+            filterKey: group,
+            count: _groupCounts[group] ?? 0,
+            icon: null,
+          ),
       ],
+    );
+  }
+
+  Widget _buildCategoryRow({
+    required String title,
+    required String filterKey,
+    required int count,
+    IconData? icon,
+    FocusNode? focusNode,
+  }) {
+    final isSelected = _selectedGroup == filterKey;
+    return InkWell(
+      focusNode: focusNode,
+      onTap: () {
+        setState(() {
+          _clearSearch();
+          _selectedGroup = filterKey;
+          _applyFilters();
+        });
+        _saveSession();
+      },
+      child: Container(
+        height: 42,
+        padding: const EdgeInsets.symmetric(horizontal: 14),
+        decoration: BoxDecoration(
+          color: isSelected
+              ? const Color(0xFF6C5CE7).withValues(alpha: 0.22)
+              : Colors.transparent,
+          border: Border(
+            bottom: const BorderSide(color: Color(0xFF1E1D2F), width: 1),
+            left: isSelected
+                ? const BorderSide(color: Color(0xFFFFD32A), width: 3.5)
+                : BorderSide.none,
+          ),
+        ),
+        child: Row(
+          children: [
+            if (icon != null) ...[
+              Icon(
+                icon,
+                size: 15,
+                color: isSelected ? const Color(0xFFFFD32A) : const Color(0xFF6C5CE7),
+              ),
+              const SizedBox(width: 8),
+            ],
+            Expanded(
+              child: Text(
+                title,
+                style: TextStyle(
+                  color: isSelected ? const Color(0xFFFFD32A) : Colors.white,
+                  fontSize: 13,
+                  fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Text(
+              '$count',
+              style: TextStyle(
+                color: isSelected ? const Color(0xFFFFD32A) : Colors.white38,
+                fontSize: 12,
+                fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -2633,20 +3188,24 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
     );
   }
 
-  Widget _buildChannelList() {
-    if (_filteredChannels.isEmpty) {
-      return const Center(
-        child: Text(
-          'No channels match your filter',
-          style: TextStyle(color: Colors.white38),
-        ),
-      );
+  String _extractStreamId(db.Channel channel, int index) {
+    if (channel.channelNumber != null && channel.channelNumber! > 0) {
+      return '${channel.channelNumber}';
     }
+    final uri = Uri.tryParse(channel.streamUrl);
+    if (uri != null && uri.pathSegments.isNotEmpty) {
+      final last = uri.pathSegments.last.replaceAll(RegExp(r'\..+$'), '');
+      if (RegExp(r'^\d+$').hasMatch(last)) {
+        return last;
+      }
+    }
+    return '${index + 1}';
+  }
 
+  Widget _buildChannelList() {
     // Build failover group rows to show above the channel list
     final failoverGroupWidgets = <Widget>[];
     if (_failoverGroups.isNotEmpty && !_multiSelectMode && _searchQuery.isEmpty && _sidebarSearchQuery.isEmpty) {
-      // Build channel lookup map for performance
       final channelById = <String, db.Channel>{};
       for (final c in _allChannels) {
         channelById[c.id] = c;
@@ -2670,7 +3229,7 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
 
     final listWidget = ListView.builder(
       controller: _channelListController,
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      padding: EdgeInsets.zero,
       itemCount: _filteredChannels.length + (failoverGroupWidgets.isNotEmpty ? failoverGroupWidgets.length + 1 : 0),
       itemBuilder: (context, index) {
         // Inject failover group rows at the top
@@ -2698,13 +3257,11 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
                 if (hasFocus && Platform.isAndroid) _selectChannel(index);
               },
               onKeyEvent: (node, event) {
-                // Track this node so sidebar can navigate back
                 final key = event.logicalKey;
                 final isCenterKey = key == LogicalKeyboardKey.select ||
                     key == LogicalKeyboardKey.enter ||
                     key == LogicalKeyboardKey.gameButtonA;
 
-                // Long-press CENTER on TV remote → enter/toggle multi-select
                 if (Platform.isAndroid && isCenterKey) {
                   if (event is KeyDownEvent) {
                     _longPressChannelId = channel.id;
@@ -2732,11 +3289,7 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
                     _longPressTimer?.cancel();
                     _longPressTimer = null;
                     _longPressChannelId = null;
-                    if (wasLongPress) {
-                      // Long-press already fired, consume the up event
-                      return KeyEventResult.handled;
-                    }
-                    // Short press: toggle selection if in multi-select, else fullscreen
+                    if (wasLongPress) return KeyEventResult.handled;
                     if (_multiSelectMode) {
                       setState(() {
                         if (_multiSelectedChannelIds.contains(channel.id)) {
@@ -2754,25 +3307,6 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
                 }
 
                 if (event is! KeyDownEvent) return KeyEventResult.ignored;
-                // SHIFT+ENTER → toggle multi-select (keyboard/desktop)
-                if (isCenterKey &&
-                    HardwareKeyboard.instance.logicalKeysPressed.any((k) =>
-                        k == LogicalKeyboardKey.shiftLeft || k == LogicalKeyboardKey.shiftRight)) {
-                  setState(() {
-                    if (!_multiSelectMode) {
-                      _multiSelectMode = true;
-                      _multiSelectedChannelIds = {channel.id};
-                    } else {
-                      if (_multiSelectedChannelIds.contains(channel.id)) {
-                        _multiSelectedChannelIds.remove(channel.id);
-                      } else {
-                        _multiSelectedChannelIds.add(channel.id);
-                      }
-                    }
-                  });
-                  return KeyEventResult.handled;
-                }
-                // SELECT/ENTER → toggle in multi-select, else fullscreen
                 if (isCenterKey) {
                   if (_multiSelectMode) {
                     setState(() {
@@ -2787,37 +3321,11 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
                   }
                   return KeyEventResult.handled;
                 }
-                // LEFT from channel list → focus sidebar
                 if (key == LogicalKeyboardKey.arrowLeft) {
                   _sidebarAllItemFocusNode.requestFocus();
                   return KeyEventResult.handled;
                 }
-                // BACK exits multi-select mode on TV
-                if (_multiSelectMode && key == LogicalKeyboardKey.goBack) {
-                  setState(() {
-                    _multiSelectMode = false;
-                    _multiSelectedChannelIds.clear();
-                  });
-                  return KeyEventResult.handled;
-                }
-                // MENU/contextMenu → toggle multi-select for this channel
-                if (key == LogicalKeyboardKey.contextMenu ||
-                    key == LogicalKeyboardKey.f5) {
-                  setState(() {
-                    if (!_multiSelectMode) {
-                      _multiSelectMode = true;
-                      _multiSelectedChannelIds = {channel.id};
-                    } else {
-                      if (_multiSelectedChannelIds.contains(channel.id)) {
-                        _multiSelectedChannelIds.remove(channel.id);
-                      } else {
-                        _multiSelectedChannelIds.add(channel.id);
-                      }
-                    }
-                  });
-                  return KeyEventResult.handled;
-                }
-                return KeyEventResult.ignored; // Let Flutter handle UP/DOWN naturally
+                return KeyEventResult.ignored;
               },
               child: Builder(
                 builder: (context) {
@@ -2825,38 +3333,7 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
                   final isMultiSelected = _multiSelectMode && _multiSelectedChannelIds.contains(channel.id);
                   return InkWell(
                     onTap: () {
-                      // Check modifier keys using both APIs for macOS compatibility
-                      final hwPressed = HardwareKeyboard.instance.logicalKeysPressed;
-                      // ignore: deprecated_member_use
-                      final rawPressed = RawKeyboard.instance.keysPressed;
-                      final shiftOrCmd = hwPressed.contains(LogicalKeyboardKey.shiftLeft) ||
-                           hwPressed.contains(LogicalKeyboardKey.shiftRight) ||
-                           hwPressed.contains(LogicalKeyboardKey.metaLeft) ||
-                           hwPressed.contains(LogicalKeyboardKey.metaRight) ||
-                           rawPressed.contains(LogicalKeyboardKey.shiftLeft) ||
-                           rawPressed.contains(LogicalKeyboardKey.shiftRight) ||
-                           rawPressed.contains(LogicalKeyboardKey.metaLeft) ||
-                           rawPressed.contains(LogicalKeyboardKey.metaRight);
-                      try {
-                        File('/tmp/click_debug.log').writeAsStringSync(
-                          '${DateTime.now()} TAP ch=${channel.name} shift=$shiftOrCmd multiMode=$_multiSelectMode hw=${hwPressed.map((k) => k.debugName).join(",")} raw=${rawPressed.map((k) => k.debugName).join(",")}\n',
-                          mode: FileMode.append);
-                      } catch (_) {}
-                      if (shiftOrCmd) {
-                        // Shift/Cmd+click: toggle multi-select
-                        setState(() {
-                          if (!_multiSelectMode) {
-                            _multiSelectMode = true;
-                            _multiSelectedChannelIds = {channel.id};
-                          } else {
-                            if (_multiSelectedChannelIds.contains(channel.id)) {
-                              _multiSelectedChannelIds.remove(channel.id);
-                            } else {
-                              _multiSelectedChannelIds.add(channel.id);
-                            }
-                          }
-                        });
-                      } else if (_multiSelectMode) {
+                      if (_multiSelectMode) {
                         setState(() {
                           if (_multiSelectedChannelIds.contains(channel.id)) {
                             _multiSelectedChannelIds.remove(channel.id);
@@ -2868,178 +3345,170 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
                         _selectChannel(index);
                       }
                     },
-                    onLongPress: _multiSelectMode ? null : () {
-                      if (Platform.isAndroid) {
-                        // TV: long-press enters multi-select
-                        setState(() {
-                          _multiSelectMode = true;
-                          _multiSelectedChannelIds = {channel.id};
-                        });
-                      } else {
-                        _goFullscreen(channel);
-                      }
-                    },
-            borderRadius: BorderRadius.circular(8),
-            child: Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-              decoration: BoxDecoration(
-                color: isMultiSelected
-                    ? const Color(0xFF6C5CE7).withValues(alpha: 0.25)
-                    : isSelected
-                    ? const Color(0xFF6C5CE7).withValues(alpha: 0.3)
-                    : focused
-                        ? const Color(0xFF6C5CE7).withValues(alpha: 0.15)
-                        : Colors.transparent,
-                borderRadius: BorderRadius.circular(8),
-                border: focused
-                    ? Border.all(color: Colors.white, width: 2.0)
-                    : isMultiSelected
-                        ? Border.all(color: const Color(0xFF6C5CE7), width: 1.5)
-                    : isSelected
-                        ? Border.all(
-                            color: const Color(0xFF6C5CE7), width: 1.5)
-                        : null,
-              ),
-              child: Row(
-                children: [
-                  // Multi-select checkbox
-                  if (_multiSelectMode)
-                    Padding(
-                      padding: const EdgeInsets.only(right: 8),
-                      child: Icon(
-                        isMultiSelected ? Icons.check_box : Icons.check_box_outline_blank,
-                        size: 20,
-                        color: isMultiSelected ? const Color(0xFF6C5CE7) : Colors.white38,
+                    onDoubleTap: () => _goFullscreen(channel),
+                    borderRadius: BorderRadius.zero,
+                    child: Container(
+                      height: 44,
+                      padding: const EdgeInsets.symmetric(horizontal: 10),
+                      decoration: BoxDecoration(
+                        color: isMultiSelected
+                            ? const Color(0xFF6C5CE7).withValues(alpha: 0.25)
+                            : isSelected
+                            ? const Color(0xFF6C5CE7).withValues(alpha: 0.25)
+                            : focused
+                                ? const Color(0xFF6C5CE7).withValues(alpha: 0.15)
+                                : Colors.transparent,
+                        border: Border(
+                          bottom: const BorderSide(color: Color(0xFF1E1D2F), width: 1),
+                          left: isSelected
+                              ? const BorderSide(color: Color(0xFFFFD32A), width: 3.5)
+                              : BorderSide.none,
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          if (_multiSelectMode)
+                            Padding(
+                              padding: const EdgeInsets.only(right: 6),
+                              child: Icon(
+                                isMultiSelected ? Icons.check_box : Icons.check_box_outline_blank,
+                                size: 18,
+                                color: isMultiSelected ? const Color(0xFF6C5CE7) : Colors.white38,
+                              ),
+                            ),
+                          // Stream ID / channel number
+                          SizedBox(
+                            width: 44,
+                            child: Text(
+                              _extractStreamId(channel, index),
+                              style: TextStyle(
+                                color: isSelected ? const Color(0xFFFFD32A) : Colors.white38,
+                                fontSize: 11,
+                                fontFamily: 'monospace',
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          const SizedBox(width: 4),
+
+                          // Channel Logo
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(4),
+                            child: SizedBox(
+                              width: 28,
+                              height: 20,
+                              child: channel.tvgLogo != null && channel.tvgLogo!.isNotEmpty
+                                  ? Image.network(
+                                      channel.tvgLogo!,
+                                      fit: BoxFit.contain,
+                                      errorBuilder: (_, __, ___) => const Icon(Icons.tv, size: 14, color: Colors.white24),
+                                    )
+                                  : const Icon(Icons.tv, size: 14, color: Colors.white24),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+
+                          // Channel Name
+                          Expanded(
+                            child: Text(
+                              _channelDisplayName(channel),
+                              style: TextStyle(
+                                color: isSelected ? const Color(0xFFFFD32A) : Colors.white,
+                                fontSize: 13,
+                                fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+
+                          // Favorite Star
+                          if (isFavorited)
+                            const Padding(
+                              padding: EdgeInsets.only(left: 4),
+                              child: Icon(Icons.star_rounded, size: 15, color: Color(0xFFFFD32A)),
+                            ),
+
+                          // Replay icon
+                          if (channel.tvgId != null && channel.tvgId!.isNotEmpty)
+                            const Padding(
+                              padding: EdgeInsets.only(left: 4),
+                              child: Icon(Icons.replay_rounded, size: 14, color: Color(0xFF6C5CE7)),
+                            ),
+                        ],
                       ),
                     ),
-                  // Channel logo
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(6),
-                    child: SizedBox(
-                      width: 36,
-                      height: 36,
-                      child: channel.tvgLogo != null &&
-                              channel.tvgLogo!.isNotEmpty
-                          ? Image.network(
-                              channel.tvgLogo!,
-                              fit: BoxFit.cover,
-                              errorBuilder: (_, e, s) => Container(
-                                color: const Color(0xFF16213E),
-                                child: const Icon(Icons.tv,
-                                    size: 18, color: Colors.white24),
-                              ),
-                            )
-                          : Container(
-                              color: const Color(0xFF16213E),
-                              child: const Icon(Icons.tv,
-                                  size: 18, color: Colors.white24),
-                            ),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  // Channel name + group + now-playing
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            Flexible(
-                              child: Text(
-                                _channelDisplayName(channel),
-                                style: TextStyle(
-                                  color: isSelected
-                                      ? Colors.white
-                                      : Colors.white70,
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 13,
-                                ),
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                            if (_qualityBadge(channel.name) != null)
-                              _qualityBadge(channel.name)!,
-                          ],
-                        ),
-                        if (_getProviderName(channel.providerId).isNotEmpty ||
-                            (channel.groupTitle != null && channel.groupTitle!.isNotEmpty))
-                          Text(
-                            [
-                              if (_getProviderName(channel.providerId).isNotEmpty)
-                                _getProviderName(channel.providerId),
-                              if (channel.groupTitle != null && channel.groupTitle!.isNotEmpty)
-                                channel.groupTitle!,
-                            ].join(' · '),
-                            style: const TextStyle(
-                              color: Colors.white38,
-                              fontSize: 11,
-                            ),
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        if (_getChannelNowPlaying(channel) != null)
-                          Text(
-                            _getChannelNowPlaying(channel)!,
-                            style: const TextStyle(
-                              color: Color(0xFF6C5CE7),
-                              fontSize: 11,
-                            ),
-                            overflow: TextOverflow.ellipsis,
-                          )
-                        else if (_epgLoading)
-                          const Text(
-                            'Loading guide…',
-                            style: TextStyle(
-                              color: Colors.white24,
-                              fontSize: 11,
-                              fontStyle: FontStyle.italic,
-                            ),
-                          ),
-                      ],
-                    ),
-                  ),
-                  // Favorite indicator
-                  if (isFavorited)
-                    const Padding(
-                      padding: EdgeInsets.only(right: 4),
-                      child: Icon(Icons.star_rounded, color: Colors.amber, size: 16),
-                    ),
-                  // Now-playing indicator
-                  if (isSelected)
-                    const Icon(Icons.play_arrow_rounded,
-                        color: Color(0xFF6C5CE7), size: 20),
-                ],
-              ),
-            ),
-          );  // InkWell + return
-          },  // Builder builder
-          ),  // Builder
-          ),  // Focus
-          ),  // GestureDetector
-        );    // Material
-      },
-    );
-
-    return Stack(
-      children: [
-        listWidget,
-        Positioned(
-          left: 0, right: 0, bottom: 0,
-          height: 40,
-          child: IgnorePointer(
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [
-                    Colors.transparent,
-                    const Color(0xFF0A0A0F),
-                  ],
-                ),
+                  );
+                },
               ),
             ),
           ),
+        );
+      },
+    );
+
+    return Column(
+      children: [
+        // Middle Column Channel Search (Screenshot 1)
+        Container(
+          height: 42,
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+          decoration: const BoxDecoration(
+            color: Color(0xFF0F0E1A),
+            border: Border(
+              bottom: BorderSide(color: Color(0xFF1E1D2F), width: 1),
+            ),
+          ),
+          child: TextField(
+            controller: _searchController,
+            style: const TextStyle(color: Colors.white, fontSize: 12),
+            decoration: InputDecoration(
+              hintText: 'Search channels in $_selectedGroup…',
+              hintStyle: const TextStyle(color: Colors.white24, fontSize: 12),
+              prefixIcon: const Icon(Icons.search_rounded, size: 14, color: Colors.white24),
+              prefixIconConstraints: const BoxConstraints(minWidth: 28),
+              suffixIcon: _searchQuery.isNotEmpty
+                  ? GestureDetector(
+                      onTap: () {
+                        _searchController.clear();
+                        setState(() {
+                          _searchQuery = '';
+                          _applyFilters();
+                        });
+                      },
+                      child: const Icon(Icons.close_rounded, size: 14, color: Colors.white24),
+                    )
+                  : null,
+              suffixIconConstraints: const BoxConstraints(minWidth: 28),
+              filled: true,
+              fillColor: Colors.white.withValues(alpha: 0.05),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 8),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(6),
+                borderSide: BorderSide.none,
+              ),
+            ),
+            onChanged: (val) {
+              _searchDebounce?.cancel();
+              _searchDebounce = Timer(const Duration(milliseconds: 250), () {
+                setState(() {
+                  _searchQuery = val.trim();
+                  _applyFilters();
+                });
+              });
+            },
+          ),
+        ),
+        Expanded(
+          child: _filteredChannels.isEmpty
+              ? const Center(
+                  child: Text(
+                    'No channels match your filter',
+                    style: TextStyle(color: Colors.white38),
+                  ),
+                )
+              : listWidget,
         ),
       ],
     );
@@ -5124,7 +5593,7 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
       );
     }
 
-    final shiftHours = _epgTimeshifts[channel.id] ?? 0;
+    final shiftHours = _getEffectiveTimeshift(channel.id);
     final fetchShift = Duration(hours: shiftHours);
 
     return FutureBuilder<List<db.EpgProgramme>>(
@@ -5143,7 +5612,7 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
 
         final programmes = snapshot.data!;
         final now = DateTime.now();
-        final shift = Duration(hours: _epgTimeshifts[channel.id] ?? 0);
+        final shift = Duration(hours: _getEffectiveTimeshift(channel.id));
 
         return SizedBox(
           width: totalWidth,

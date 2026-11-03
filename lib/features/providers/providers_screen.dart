@@ -63,16 +63,37 @@ class ProvidersScreen extends ConsumerWidget {
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             children: [
               if (providers.isNotEmpty) ...[
-                const _SectionHeader(title: 'Your Providers'),
+                const _SectionHeader(title: 'Your Playlists'),
                 ...providers.map((p) => _ProviderCard(provider: p)),
-                const SizedBox(height: 24),
+              ] else ...[
+                Center(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 48),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Icon(Icons.playlist_play_rounded, size: 64, color: Colors.white24),
+                        const SizedBox(height: 16),
+                        const Text(
+                          'No playlists added yet',
+                          style: TextStyle(fontSize: 18, color: Colors.white70),
+                        ),
+                        const SizedBox(height: 8),
+                        const Text(
+                          'Add an IPTV or M3U playlist to begin watching',
+                          style: TextStyle(fontSize: 14, color: Colors.white38),
+                        ),
+                        const SizedBox(height: 24),
+                        FilledButton.icon(
+                          onPressed: () => showAddProviderDialog(context),
+                          icon: const Icon(Icons.add),
+                          label: const Text('Add Playlist'),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
               ],
-              const _SectionHeader(title: 'Free TV Providers'),
-              const SizedBox(height: 4),
-              ...FreeTvProvider.all.map((fp) => _FreeTvProviderTile(
-                    freeProvider: fp,
-                    isAdded: providers.any((p) => p.id == fp.id),
-                  )),
             ],
           ),
         ),
@@ -259,178 +280,3 @@ class _ProviderCard extends ConsumerWidget {
   }
 }
 
-/// A well-known free FAST TV provider
-class FreeTvProvider {
-  final String id;
-  final String name;
-  final String url;
-  final String? epgUrl;
-  final IconData icon;
-  final String description;
-
-  const FreeTvProvider({
-    required this.id,
-    required this.name,
-    required this.url,
-    this.epgUrl,
-    this.icon = Icons.live_tv_rounded,
-    this.description = '',
-  });
-
-  static const all = [
-    FreeTvProvider(
-      id: 'pluto-tv',
-      name: 'Pluto TV',
-      url: 'https://raw.githubusercontent.com/iptv-org/iptv/master/streams/us_pluto.m3u',
-      description: '400+ free channels — news, movies, sports, comedy',
-      icon: Icons.live_tv_rounded,
-    ),
-    FreeTvProvider(
-      id: 'samsung-tv-plus',
-      name: 'Samsung TV Plus',
-      url: 'https://raw.githubusercontent.com/iptv-org/iptv/master/streams/us_samsung.m3u',
-      description: 'Free channels from Samsung — entertainment, news, sports',
-      icon: Icons.tv_rounded,
-    ),
-    FreeTvProvider(
-      id: 'plex-tv',
-      name: 'Plex FAST',
-      url: 'https://raw.githubusercontent.com/iptv-org/iptv/master/streams/us_plex.m3u',
-      description: 'Free live TV from Plex — movies, shows, news',
-      icon: Icons.play_circle_outline_rounded,
-    ),
-    FreeTvProvider(
-      id: 'stirr-tv',
-      name: 'Stirr',
-      url: 'https://raw.githubusercontent.com/iptv-org/iptv/master/streams/us_stirr.m3u',
-      description: 'Free local & national channels from Sinclair',
-      icon: Icons.cell_tower_rounded,
-    ),
-    FreeTvProvider(
-      id: 'xumo-tv',
-      name: 'Xumo',
-      url: 'https://raw.githubusercontent.com/iptv-org/iptv/master/streams/us_xumo.m3u',
-      description: 'Free streaming — news, sports, movies, kids',
-      icon: Icons.stream_rounded,
-    ),
-    FreeTvProvider(
-      id: 'tubi-tv',
-      name: 'Tubi',
-      url: 'https://raw.githubusercontent.com/iptv-org/iptv/master/streams/us_tubi.m3u',
-      description: 'Free movies and TV shows, ad-supported',
-      icon: Icons.movie_filter_rounded,
-    ),
-    FreeTvProvider(
-      id: 'roku-channel',
-      name: 'The Roku Channel',
-      url: 'https://www.apsattv.com/rok.m3u',
-      description: 'Free live TV and on-demand from Roku',
-      icon: Icons.connected_tv_rounded,
-    ),
-    FreeTvProvider(
-      id: 'iptv-org-us',
-      name: 'IPTV-Org (US)',
-      url: 'https://iptv-org.github.io/iptv/countries/us.m3u',
-      description: 'Community-maintained US channels aggregator',
-      icon: Icons.public_rounded,
-    ),
-  ];
-}
-
-class _FreeTvProviderTile extends ConsumerWidget {
-  final FreeTvProvider freeProvider;
-  final bool isAdded;
-
-  const _FreeTvProviderTile({
-    required this.freeProvider,
-    required this.isAdded,
-  });
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    const accent = Color(0xFF6C5CE7);
-    return Card(
-      margin: const EdgeInsets.only(bottom: 8),
-      child: Focus(
-        onKeyEvent: (node, event) {
-          if (event is! KeyDownEvent) return KeyEventResult.ignored;
-          if (event.logicalKey == LogicalKeyboardKey.select ||
-              event.logicalKey == LogicalKeyboardKey.enter) {
-            _addProvider(context, ref);
-            return KeyEventResult.handled;
-          }
-          return KeyEventResult.ignored;
-        },
-        child: Builder(
-          builder: (context) {
-            final hasFocus = Focus.of(context).hasFocus;
-            return InkWell(
-              borderRadius: BorderRadius.circular(12),
-              onTap: () => _addProvider(context, ref),
-              child: Container(
-                decoration: hasFocus
-                    ? BoxDecoration(
-                        border: Border.all(color: accent, width: 2),
-                        borderRadius: BorderRadius.circular(12),
-                      )
-                    : null,
-                child: ListTile(
-                  leading: Icon(freeProvider.icon, color: accent, size: 32),
-                  title: Text(
-                    freeProvider.name,
-                    style: const TextStyle(fontWeight: FontWeight.w600),
-                  ),
-                  subtitle: Text(
-                    freeProvider.description,
-                    style: const TextStyle(fontSize: 12, color: Colors.white54),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  trailing: isAdded
-                      ? Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const Icon(Icons.check_circle, color: Colors.greenAccent, size: 22),
-                            const SizedBox(width: 4),
-                            IconButton(
-                              icon: const Icon(Icons.refresh_rounded, color: Colors.white38, size: 20),
-                              tooltip: 'Re-sync',
-                              onPressed: () => _addProvider(context, ref),
-                            ),
-                          ],
-                        )
-                      : const Icon(Icons.add_circle_outline, color: accent, size: 28),
-                ),
-              ),
-            );
-          },
-        ),
-      ),
-    );
-  }
-
-  Future<void> _addProvider(BuildContext context, WidgetRef ref) async {
-    try {
-      final manager = ref.read(providerManagerProvider);
-      await manager.addM3uProvider(
-        id: freeProvider.id,
-        name: freeProvider.name,
-        url: freeProvider.url,
-      );
-      if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('${freeProvider.name} ${isAdded ? "refreshed" : "added"} — loading channels...')),
-      );
-    } on ProviderLimitException catch (e) {
-      if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.toString())),
-      );
-    } catch (e) {
-      if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to add: $e')),
-      );
-    }
-  }
-}

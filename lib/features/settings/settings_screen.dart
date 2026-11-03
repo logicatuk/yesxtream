@@ -1,27 +1,999 @@
 import 'dart:io';
 
-import 'package:drift/drift.dart' show Value;
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/countdown_snackbar.dart';
-import '../../core/weather_service.dart';
 import '../../data/datasources/local/database.dart' as db;
+import '../../data/services/app_settings.dart';
 import '../../data/services/app_update_service.dart';
 import '../../data/services/backup_service.dart';
 import '../../data/services/epg_refresh_service.dart';
+import '../../data/services/playback_history_service.dart';
+import '../player/player_service.dart';
 import '../providers/provider_manager.dart';
-import '../remote/web_remote_server.dart';
 import 'add_epg_source_dialog.dart';
-import '../shows/shows_providers.dart';
-import '../../data/datasources/remote/trakt_client.dart';
-import '../../data/datasources/remote/tmdb_client.dart';
+
+enum SettingsGroup {
+  general('General', Icons.tune_rounded),
+  playback('Playback', Icons.play_circle_outline_rounded),
+  audioSubtitles('Audio/subtitles', Icons.subtitles_rounded),
+  liveTvGuide('Live TV / Guide', Icons.live_tv_rounded),
+  parentalControls('Parental controls', Icons.lock_outline_rounded),
+  deviceLicense('Device / License', Icons.devices_rounded),
+  privacy('Privacy', Icons.shield_outlined),
+  helpAbout('Help / About', Icons.help_outline_rounded);
+
+  final String label;
+  final IconData icon;
+  const SettingsGroup(this.label, this.icon);
+}
+
+class SettingsScreen extends ConsumerStatefulWidget {
+  final SettingsGroup initialGroup;
+
+  const SettingsScreen({
+    super.key,
+    this.initialGroup = SettingsGroup.general,
+  });
+
+  @override
+  ConsumerState<SettingsScreen> createState() => _SettingsScreenState();
+}
+
+class _SettingsScreenState extends ConsumerState<SettingsScreen> {
+  late SettingsGroup _selectedGroup;
+  bool _keyRevealed = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _selectedGroup = widget.initialGroup;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final screenWidth = MediaQuery.of(context).size.width;
+    final isCompact = screenWidth < 650;
+
+    return Scaffold(
+      backgroundColor: const Color(0xFF0A0A0F),
+      appBar: AppBar(
+        backgroundColor: const Color(0xFF0D0D14),
+        elevation: 0,
+        title: const Text(
+          'Settings',
+          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20),
+        ),
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_rounded),
+          onPressed: () {
+            if (context.canPop()) {
+              context.pop();
+            } else {
+              context.go('/home');
+            }
+          },
+        ),
+      ),
+      body: isCompact ? _buildCompactLayout() : _buildTwoPanelLayout(),
+    );
+  }
+
+  Widget _buildTwoPanelLayout() {
+    return Row(
+      children: [
+        // ── Left Navigation Menu ──
+        Container(
+          width: 240,
+          decoration: const BoxDecoration(
+            color: Color(0xFF0F0E17),
+            border: Border(
+              right: BorderSide(color: Color(0xFF1E1E2E), width: 1),
+            ),
+          ),
+          child: ListView.separated(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+            itemCount: SettingsGroup.values.length,
+            separatorBuilder: (_, __) => const SizedBox(height: 4),
+            itemBuilder: (context, index) {
+              final group = SettingsGroup.values[index];
+              final isSelected = group == _selectedGroup;
+
+              return ListTile(
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                tileColor: isSelected ? const Color(0xFF6C5CE7).withValues(alpha: 0.22) : Colors.transparent,
+                leading: Icon(
+                  group.icon,
+                  color: isSelected ? const Color(0xFFA29BFE) : Colors.white60,
+                  size: 20,
+                ),
+                title: Text(
+                  group.label,
+                  style: TextStyle(
+                    color: isSelected ? Colors.white : Colors.white70,
+                    fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+                    fontSize: 14,
+                  ),
+                ),
+                onTap: () => setState(() => _selectedGroup = group),
+              );
+            },
+          ),
+        ),
+
+        // ── Right Content Panel ──
+        Expanded(
+          child: Container(
+            color: const Color(0xFF0A0A0F),
+            child: _buildGroupContent(_selectedGroup),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildCompactLayout() {
+    return ListView(
+      children: SettingsGroup.values.map((group) {
+        return ListTile(
+          leading: Icon(group.icon, color: const Color(0xFF6C5CE7)),
+          title: Text(group.label, style: const TextStyle(color: Colors.white)),
+          trailing: const Icon(Icons.chevron_right_rounded, color: Colors.white38),
+          onTap: () {
+            Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => Scaffold(
+                  backgroundColor: const Color(0xFF0A0A0F),
+                  appBar: AppBar(
+                    backgroundColor: const Color(0xFF0D0D14),
+                    title: Text(group.label),
+                  ),
+                  body: _buildGroupContent(group),
+                ),
+              ),
+            );
+          },
+        );
+      }).toList(),
+    );
+  }
+
+  Widget _buildGroupContent(SettingsGroup group) {
+    switch (group) {
+      case SettingsGroup.general:
+        return _buildGeneralSettings();
+      case SettingsGroup.playback:
+        return _buildPlaybackSettings();
+      case SettingsGroup.audioSubtitles:
+        return _buildAudioSubtitlesSettings();
+      case SettingsGroup.liveTvGuide:
+        return _buildLiveTvGuideSettings();
+      case SettingsGroup.parentalControls:
+        return _buildParentalControlsSettings();
+      case SettingsGroup.deviceLicense:
+        return _buildDeviceLicenseSettings();
+      case SettingsGroup.privacy:
+        return _buildPrivacySettings();
+      case SettingsGroup.helpAbout:
+        return _buildHelpAboutSettings();
+    }
+  }
+
+  // ──────────────────────────────
+  // 1. General Settings
+  // ──────────────────────────────
+  Widget _buildGeneralSettings() {
+    final settings = ref.watch(appSettingsProvider);
+
+    return ListView(
+      padding: const EdgeInsets.all(24),
+      children: [
+        _SectionHeader(title: 'General', subtitle: 'Language, startup behavior, and appearance'),
+        _SettingsCard(
+          children: [
+            // Language
+            ListTile(
+              leading: const Icon(Icons.language_rounded, color: Colors.white70),
+              title: const Text('Language', style: TextStyle(color: Colors.white)),
+              trailing: DropdownButton<String>(
+                value: settings.language,
+                dropdownColor: const Color(0xFF1E1C2E),
+                style: const TextStyle(color: Colors.white),
+                underline: const SizedBox.shrink(),
+                items: ['English', 'Spanish', 'French', 'German', 'Arabic', 'Portuguese']
+                    .map((l) => DropdownMenuItem(value: l, child: Text(l)))
+                    .toList(),
+                onChanged: (val) {
+                  if (val != null) {
+                    ref.read(appSettingsProvider.notifier).update((s) => s.copyWith(language: val));
+                  }
+                },
+              ),
+            ),
+            const Divider(color: Color(0xFF26243A), height: 1),
+
+            // Startup Page
+            ListTile(
+              leading: const Icon(Icons.launch_rounded, color: Colors.white70),
+              title: const Text('Startup page', style: TextStyle(color: Colors.white)),
+              trailing: DropdownButton<String>(
+                value: settings.startupPage,
+                dropdownColor: const Color(0xFF1E1C2E),
+                style: const TextStyle(color: Colors.white),
+                underline: const SizedBox.shrink(),
+                items: ['Home', 'Live TV', 'Movies', 'Series']
+                    .map((p) => DropdownMenuItem(value: p, child: Text(p)))
+                    .toList(),
+                onChanged: (val) {
+                  if (val != null) {
+                    ref.read(appSettingsProvider.notifier).update((s) => s.copyWith(startupPage: val));
+                  }
+                },
+              ),
+            ),
+            const Divider(color: Color(0xFF26243A), height: 1),
+
+            // Clock Format
+            ListTile(
+              leading: const Icon(Icons.access_time_rounded, color: Colors.white70),
+              title: const Text('Clock format', style: TextStyle(color: Colors.white)),
+              trailing: DropdownButton<String>(
+                value: settings.clockFormat,
+                dropdownColor: const Color(0xFF1E1C2E),
+                style: const TextStyle(color: Colors.white),
+                underline: const SizedBox.shrink(),
+                items: ['12-hour', '24-hour']
+                    .map((f) => DropdownMenuItem(value: f, child: Text(f)))
+                    .toList(),
+                onChanged: (val) {
+                  if (val != null) {
+                    ref.read(appSettingsProvider.notifier).update((s) => s.copyWith(clockFormat: val));
+                  }
+                },
+              ),
+            ),
+            const Divider(color: Color(0xFF26243A), height: 1),
+
+            // Text Size
+            ListTile(
+              leading: const Icon(Icons.format_size_rounded, color: Colors.white70),
+              title: const Text('Text size', style: TextStyle(color: Colors.white)),
+              trailing: DropdownButton<String>(
+                value: settings.textSize,
+                dropdownColor: const Color(0xFF1E1C2E),
+                style: const TextStyle(color: Colors.white),
+                underline: const SizedBox.shrink(),
+                items: ['Small', 'Normal', 'Large']
+                    .map((ts) => DropdownMenuItem(value: ts, child: Text(ts)))
+                    .toList(),
+                onChanged: (val) {
+                  if (val != null) {
+                    ref.read(appSettingsProvider.notifier).update((s) => s.copyWith(textSize: val));
+                  }
+                },
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  // ──────────────────────────────
+  // 2. Playback Settings
+  // ──────────────────────────────
+  Widget _buildPlaybackSettings() {
+    final settings = ref.watch(appSettingsProvider);
+
+    return ListView(
+      padding: const EdgeInsets.all(24),
+      children: [
+        _SectionHeader(title: 'Playback', subtitle: 'Engine, stream protocol, buffer, and aspect ratio'),
+        _SettingsCard(
+          children: [
+            // Hardware Acceleration
+            SwitchListTile(
+              secondary: const Icon(Icons.speed_rounded, color: Colors.white70),
+              title: const Text('Hardware Acceleration', style: TextStyle(color: Colors.white)),
+              subtitle: const Text(
+                'Use GPU hardware decoding (auto-safe / MediaCodec). Disable if experiencing black screen or codec issues.',
+                style: TextStyle(color: Colors.white54, fontSize: 12),
+              ),
+              value: settings.hardwareAcceleration,
+              activeColor: const Color(0xFF6C5CE7),
+              onChanged: (val) {
+                ref.read(appSettingsProvider.notifier).update((s) => s.copyWith(hardwareAcceleration: val));
+                ref.read(playerServiceProvider).setHardwareAcceleration(val);
+              },
+            ),
+            const Divider(color: Color(0xFF26243A), height: 1),
+
+            // Stream Format / Protocol Selector (HLS vs MPEG-TS)
+            ListTile(
+              leading: const Icon(Icons.stream_rounded, color: Colors.white70),
+              title: const Text('Stream Format / Protocol', style: TextStyle(color: Colors.white)),
+              subtitle: const Text(
+                'Choose playback protocol for Xtream streams. HLS (.m3u8) can reduce buffering on some servers.',
+                style: TextStyle(color: Colors.white54, fontSize: 12),
+              ),
+              trailing: DropdownButton<String>(
+                value: settings.streamFormat,
+                dropdownColor: const Color(0xFF1E1C2E),
+                style: const TextStyle(color: Colors.white),
+                underline: const SizedBox.shrink(),
+                items: const [
+                  DropdownMenuItem(value: 'ts', child: Text('MPEG-TS (.ts)')),
+                  DropdownMenuItem(value: 'm3u8', child: Text('HLS (.m3u8)')),
+                ],
+                onChanged: (val) {
+                  if (val != null) {
+                    ref.read(appSettingsProvider.notifier).update((s) => s.copyWith(streamFormat: val));
+                  }
+                },
+              ),
+            ),
+            const Divider(color: Color(0xFF26243A), height: 1),
+
+            // Default Aspect Ratio
+            ListTile(
+              leading: const Icon(Icons.aspect_ratio_rounded, color: Colors.white70),
+              title: const Text('Default Aspect Ratio', style: TextStyle(color: Colors.white)),
+              subtitle: const Text(
+                'Default display scaling applied when opening a video',
+                style: TextStyle(color: Colors.white54, fontSize: 12),
+              ),
+              trailing: DropdownButton<String>(
+                value: settings.defaultAspectRatio,
+                dropdownColor: const Color(0xFF1E1C2E),
+                style: const TextStyle(color: Colors.white),
+                underline: const SizedBox.shrink(),
+                items: const [
+                  DropdownMenuItem(value: 'Fit (Auto)', child: Text('Fit (Auto)')),
+                  DropdownMenuItem(value: '16:9', child: Text('16:9')),
+                  DropdownMenuItem(value: '4:3', child: Text('4:3')),
+                  DropdownMenuItem(value: 'Fill / Stretch', child: Text('Fill / Stretch')),
+                  DropdownMenuItem(value: 'Zoom', child: Text('Zoom')),
+                ],
+                onChanged: (val) {
+                  if (val != null) {
+                    ref.read(appSettingsProvider.notifier).update((s) => s.copyWith(defaultAspectRatio: val));
+                  }
+                },
+              ),
+            ),
+            const Divider(color: Color(0xFF26243A), height: 1),
+
+            // Buffer Size
+            _BufferSizeTile(),
+            const Divider(color: Color(0xFF26243A), height: 1),
+
+            // Failover Mode
+            _FailoverModeTile(),
+            const Divider(color: Color(0xFF26243A), height: 1),
+
+            // User Agent
+            _UserAgentTile(),
+          ],
+        ),
+      ],
+    );
+  }
+
+  // ──────────────────────────────
+  // 3. Audio & Subtitles Settings
+  // ──────────────────────────────
+  Widget _buildAudioSubtitlesSettings() {
+    final settings = ref.watch(appSettingsProvider);
+    final languages = [
+      'English',
+      'Spanish',
+      'French',
+      'German',
+      'Arabic',
+      'Italian',
+      'Portuguese',
+      'Turkish',
+      'Russian',
+      'Japanese'
+    ];
+
+    return ListView(
+      padding: const EdgeInsets.all(24),
+      children: [
+        _SectionHeader(title: 'Audio & Subtitles', subtitle: 'Track preferences and episode behavior'),
+        _SettingsCard(
+          children: [
+            // Preferred Audio Language
+            ListTile(
+              leading: const Icon(Icons.audiotrack_rounded, color: Colors.white70),
+              title: const Text('Preferred audio language', style: TextStyle(color: Colors.white)),
+              trailing: DropdownButton<String>(
+                value: languages.contains(settings.preferredAudioLanguage)
+                    ? settings.preferredAudioLanguage
+                    : 'English',
+                dropdownColor: const Color(0xFF1E1C2E),
+                style: const TextStyle(color: Colors.white),
+                underline: const SizedBox.shrink(),
+                items: languages.map((l) => DropdownMenuItem(value: l, child: Text(l))).toList(),
+                onChanged: (val) {
+                  if (val != null) {
+                    ref.read(appSettingsProvider.notifier).update((s) => s.copyWith(preferredAudioLanguage: val));
+                  }
+                },
+              ),
+            ),
+            const Divider(color: Color(0xFF26243A), height: 1),
+
+            // Fallback Audio Language
+            ListTile(
+              leading: const Icon(Icons.queue_music_rounded, color: Colors.white70),
+              title: const Text('Fallback audio language', style: TextStyle(color: Colors.white)),
+              trailing: DropdownButton<String>(
+                value: languages.contains(settings.fallbackAudioLanguage)
+                    ? settings.fallbackAudioLanguage
+                    : 'English',
+                dropdownColor: const Color(0xFF1E1C2E),
+                style: const TextStyle(color: Colors.white),
+                underline: const SizedBox.shrink(),
+                items: languages.map((l) => DropdownMenuItem(value: l, child: Text(l))).toList(),
+                onChanged: (val) {
+                  if (val != null) {
+                    ref.read(appSettingsProvider.notifier).update((s) => s.copyWith(fallbackAudioLanguage: val));
+                  }
+                },
+              ),
+            ),
+            const Divider(color: Color(0xFF26243A), height: 1),
+
+            // Subtitle Mode
+            ListTile(
+              leading: const Icon(Icons.subtitles_rounded, color: Colors.white70),
+              title: const Text('Subtitle mode', style: TextStyle(color: Colors.white)),
+              trailing: DropdownButton<String>(
+                value: settings.subtitleMode,
+                dropdownColor: const Color(0xFF1E1C2E),
+                style: const TextStyle(color: Colors.white),
+                underline: const SizedBox.shrink(),
+                items: ['Off', 'On', 'Auto']
+                    .map((m) => DropdownMenuItem(value: m, child: Text(m)))
+                    .toList(),
+                onChanged: (val) {
+                  if (val != null) {
+                    ref.read(appSettingsProvider.notifier).update((s) => s.copyWith(subtitleMode: val));
+                  }
+                },
+              ),
+            ),
+            const Divider(color: Color(0xFF26243A), height: 1),
+
+            // Preferred Subtitle Language
+            ListTile(
+              leading: const Icon(Icons.closed_caption_rounded, color: Colors.white70),
+              title: const Text('Preferred subtitle language', style: TextStyle(color: Colors.white)),
+              trailing: DropdownButton<String>(
+                value: languages.contains(settings.preferredSubtitleLanguage)
+                    ? settings.preferredSubtitleLanguage
+                    : 'English',
+                dropdownColor: const Color(0xFF1E1C2E),
+                style: const TextStyle(color: Colors.white),
+                underline: const SizedBox.shrink(),
+                items: languages.map((l) => DropdownMenuItem(value: l, child: Text(l))).toList(),
+                onChanged: (val) {
+                  if (val != null) {
+                    ref.read(appSettingsProvider.notifier).update((s) => s.copyWith(preferredSubtitleLanguage: val));
+                  }
+                },
+              ),
+            ),
+            const Divider(color: Color(0xFF26243A), height: 1),
+
+            // Autoplay Next Episode
+            SwitchListTile(
+              secondary: const Icon(Icons.skip_next_rounded, color: Colors.white70),
+              title: const Text('Autoplay next episode', style: TextStyle(color: Colors.white)),
+              subtitle: const Text('Automatically transition to next episode on completion',
+                  style: TextStyle(color: Colors.white54, fontSize: 12)),
+              value: settings.autoplayNextEpisode,
+              activeColor: const Color(0xFF6C5CE7),
+              onChanged: (val) {
+                ref.read(appSettingsProvider.notifier).update((s) => s.copyWith(autoplayNextEpisode: val));
+              },
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  // ──────────────────────────────
+  // 4. Live TV / Guide Settings
+  // ──────────────────────────────
+  Widget _buildLiveTvGuideSettings() {
+    final settings = ref.watch(appSettingsProvider);
+
+    return ListView(
+      padding: const EdgeInsets.all(24),
+      children: [
+        _SectionHeader(title: 'Live TV & TV Guide', subtitle: 'EPG feeds, timezone shift, and auto-refresh'),
+        _SettingsCard(
+          children: [
+            // Auto-Refresh on Startup
+            SwitchListTile(
+              secondary: const Icon(Icons.sync_rounded, color: Colors.white70),
+              title: const Text('Auto-Refresh on Startup', style: TextStyle(color: Colors.white)),
+              subtitle: const Text('Automatically refresh channel lists and EPG schedules when the app opens',
+                  style: TextStyle(color: Colors.white54, fontSize: 12)),
+              value: settings.autoRefreshOnStartup,
+              activeColor: const Color(0xFF6C5CE7),
+              onChanged: (val) {
+                ref.read(appSettingsProvider.notifier).update((s) => s.copyWith(autoRefreshOnStartup: val));
+              },
+            ),
+            const Divider(color: Color(0xFF26243A), height: 1),
+
+            // Automatic Preview
+            SwitchListTile(
+              secondary: const Icon(Icons.visibility_rounded, color: Colors.white70),
+              title: const Text('Automatic preview', style: TextStyle(color: Colors.white)),
+              subtitle: const Text('Start video preview automatically when focusing a channel',
+                  style: TextStyle(color: Colors.white54, fontSize: 12)),
+              value: settings.autoPreview,
+              activeColor: const Color(0xFF6C5CE7),
+              onChanged: (val) {
+                ref.read(appSettingsProvider.notifier).update((s) => s.copyWith(autoPreview: val));
+              },
+            ),
+            const Divider(color: Color(0xFF26243A), height: 1),
+
+            // EPG Time Shift (+/- 12 Hours)
+            ListTile(
+              leading: const Icon(Icons.schedule_rounded, color: Colors.white70),
+              title: const Text('EPG Time Shift (Offset)', style: TextStyle(color: Colors.white)),
+              subtitle: Text(
+                settings.epgTimeShiftHours == 0
+                    ? 'No shift (0 hours) • Matches provider timezone'
+                    : '${settings.epgTimeShiftHours > 0 ? "+" : ""}${settings.epgTimeShiftHours} hours • Shifts program guide schedule',
+                style: const TextStyle(color: Colors.white54, fontSize: 12),
+              ),
+              trailing: DropdownButton<int>(
+                value: settings.epgTimeShiftHours,
+                dropdownColor: const Color(0xFF1E1C2E),
+                style: const TextStyle(color: Colors.white),
+                underline: const SizedBox.shrink(),
+                items: List.generate(25, (i) {
+                  final h = i - 12; // -12 to +12
+                  final label = h == 0 ? '0h (None)' : (h > 0 ? '+$h hours' : '$h hours');
+                  return DropdownMenuItem(value: h, child: Text(label));
+                }),
+                onChanged: (val) {
+                  if (val != null) {
+                    ref.read(appSettingsProvider.notifier).update((s) => s.copyWith(epgTimeShiftHours: val));
+                  }
+                },
+              ),
+            ),
+            const Divider(color: Color(0xFF26243A), height: 1),
+
+            // EPG Sources
+            ListTile(
+              leading: const Icon(Icons.source_rounded, color: Colors.white70),
+              title: const Text('EPG Sources', style: TextStyle(color: Colors.white)),
+              subtitle: const Text('Manage XMLTV feeds and custom guide sources',
+                  style: TextStyle(color: Colors.white54, fontSize: 12)),
+              trailing: const Icon(Icons.chevron_right_rounded, color: Colors.white54),
+              onTap: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const _EpgSourcesScreen()),
+                );
+              },
+            ),
+            const Divider(color: Color(0xFF26243A), height: 1),
+
+            // Auto Refresh Interval
+            _AutoRefreshTile(),
+          ],
+        ),
+      ],
+    );
+  }
+
+  // ──────────────────────────────
+  // 5. Parental Controls Settings
+  // ──────────────────────────────
+  Widget _buildParentalControlsSettings() {
+    final settings = ref.watch(appSettingsProvider);
+
+    return ListView(
+      padding: const EdgeInsets.all(24),
+      children: [
+        _SectionHeader(title: 'Parental Controls', subtitle: 'PIN protection and category locking'),
+        _SettingsCard(
+          children: [
+            SwitchListTile(
+              secondary: const Icon(Icons.lock_rounded, color: Colors.white70),
+              title: const Text('Enable Parental Controls', style: TextStyle(color: Colors.white)),
+              subtitle: Text(
+                settings.parentalControlsEnabled
+                    ? 'Active — PIN is required to access locked sections'
+                    : 'Disabled',
+                style: const TextStyle(color: Colors.white54, fontSize: 12),
+              ),
+              value: settings.parentalControlsEnabled,
+              activeColor: const Color(0xFF6C5CE7),
+              onChanged: (val) {
+                if (val && settings.parentalPin.isEmpty) {
+                  _showSetPinDialog(context);
+                } else {
+                  ref.read(appSettingsProvider.notifier).update((s) => s.copyWith(parentalControlsEnabled: val));
+                }
+              },
+            ),
+            const Divider(color: Color(0xFF26243A), height: 1),
+            ListTile(
+              leading: const Icon(Icons.pin_rounded, color: Colors.white70),
+              title: const Text('Change PIN', style: TextStyle(color: Colors.white)),
+              subtitle: Text(
+                settings.parentalPin.isNotEmpty ? 'PIN is set (••••)' : 'No PIN set',
+                style: const TextStyle(color: Colors.white54, fontSize: 12),
+              ),
+              trailing: const Icon(Icons.edit_rounded, color: Colors.white54, size: 20),
+              onTap: () => _showSetPinDialog(context),
+            ),
+          ],
+        ),
+        const SizedBox(height: 20),
+        _SettingsCard(
+          children: [
+            const Padding(
+              padding: EdgeInsets.fromLTRB(16, 16, 16, 8),
+              child: Text(
+                'Locked Categories',
+                style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: ['Adult', 'Horror', 'News', 'Pay-Per-View'].map((cat) {
+                  final isLocked = settings.lockedCategories.contains(cat);
+                  return FilterChip(
+                    label: Text(cat),
+                    selected: isLocked,
+                    selectedColor: const Color(0xFF6C5CE7).withValues(alpha: 0.35),
+                    checkmarkColor: Colors.white,
+                    labelStyle: TextStyle(color: isLocked ? Colors.white : Colors.white70),
+                    onSelected: (selected) {
+                      final updated = List<String>.from(settings.lockedCategories);
+                      if (selected) {
+                        updated.add(cat);
+                      } else {
+                        updated.remove(cat);
+                      }
+                      ref.read(appSettingsProvider.notifier).update((s) => s.copyWith(lockedCategories: updated));
+                    },
+                  );
+                }).toList(),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  void _showSetPinDialog(BuildContext context) {
+    final ctrl = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1A192A),
+        title: const Text('Set Parental PIN'),
+        content: TextField(
+          controller: ctrl,
+          keyboardType: TextInputType.number,
+          obscureText: true,
+          maxLength: 4,
+          autofocus: true,
+          decoration: const InputDecoration(
+            labelText: '4-Digit PIN',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          FilledButton(
+            onPressed: () {
+              final pin = ctrl.text.trim();
+              if (pin.length == 4) {
+                ref.read(appSettingsProvider.notifier).update((s) => s.copyWith(
+                      parentalPin: pin,
+                      parentalControlsEnabled: true,
+                    ));
+                Navigator.pop(ctx);
+              }
+            },
+            style: FilledButton.styleFrom(backgroundColor: const Color(0xFF6C5CE7)),
+            child: const Text('Save PIN'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ──────────────────────────────
+  // 6. Device / License Settings
+  // ──────────────────────────────
+  Widget _buildDeviceLicenseSettings() {
+    return ListView(
+      padding: const EdgeInsets.all(24),
+      children: [
+        _SectionHeader(title: 'Device & License', subtitle: 'Hardware identification and active player license'),
+        _SettingsCard(
+          children: [
+            // Device ID
+            const ListTile(
+              leading: Icon(Icons.fingerprint_rounded, color: Colors.white70),
+              title: Text('Device ID', style: TextStyle(color: Colors.white)),
+              subtitle: Text('YES-XTRM-9832-MAC', style: TextStyle(color: Colors.white70, fontFamily: 'monospace')),
+            ),
+            const Divider(color: Color(0xFF26243A), height: 1),
+
+            // Revealable Key
+            ListTile(
+              leading: const Icon(Icons.vpn_key_rounded, color: Colors.white70),
+              title: const Text('Device Key', style: TextStyle(color: Colors.white)),
+              subtitle: Text(
+                _keyRevealed ? 'XK89-2911-YESX-7742' : '••••••••••••••••',
+                style: const TextStyle(color: Colors.white70, fontFamily: 'monospace'),
+              ),
+              trailing: IconButton(
+                icon: Icon(_keyRevealed ? Icons.visibility_off_rounded : Icons.visibility_rounded,
+                    color: Colors.white54),
+                onPressed: () => setState(() => _keyRevealed = !_keyRevealed),
+              ),
+            ),
+            const Divider(color: Color(0xFF26243A), height: 1),
+
+            // License Status
+            const ListTile(
+              leading: Icon(Icons.verified_rounded, color: Colors.greenAccent),
+              title: Text('License Status', style: TextStyle(color: Colors.white)),
+              subtitle: Text('Active (Lifetime Unlimited)', style: TextStyle(color: Colors.greenAccent)),
+            ),
+            const Divider(color: Color(0xFF26243A), height: 1),
+
+            // App Version & Update
+            ListTile(
+              leading: const Icon(Icons.system_update_rounded, color: Colors.white70),
+              title: const Text('App Version', style: TextStyle(color: Colors.white)),
+              subtitle: Text('YesXtream v${AppUpdateService.currentVersion}',
+                  style: const TextStyle(color: Colors.white54)),
+              trailing: FilledButton(
+                onPressed: () => _checkForUpdates(context),
+                style: FilledButton.styleFrom(backgroundColor: const Color(0xFF6C5CE7)),
+                child: const Text('Check Update'),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  // ──────────────────────────────
+  // 8. Privacy Settings
+  // ──────────────────────────────
+  Widget _buildPrivacySettings() {
+    return ListView(
+      padding: const EdgeInsets.all(24),
+      children: [
+        _SectionHeader(title: 'Privacy & Storage', subtitle: 'Manage your local data and cache'),
+        _SettingsCard(
+          children: [
+            ListTile(
+              leading: const Icon(Icons.history_rounded, color: Colors.white70),
+              title: const Text('Clear Watch History', style: TextStyle(color: Colors.white)),
+              subtitle: const Text('Remove playback resume progress and history',
+                  style: TextStyle(color: Colors.white54, fontSize: 12)),
+              trailing: OutlinedButton(
+                onPressed: () {
+                  ref.read(watchHistoryProvider.notifier).clearAll();
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Watch history cleared')),
+                  );
+                },
+                child: const Text('Clear'),
+              ),
+            ),
+            const Divider(color: Color(0xFF26243A), height: 1),
+            ListTile(
+              leading: const Icon(Icons.delete_sweep_rounded, color: Colors.redAccent),
+              title: const Text('Reset All Data', style: TextStyle(color: Colors.redAccent)),
+              subtitle: const Text('Remove all playlists, EPG cache, and preferences from this device',
+                  style: TextStyle(color: Colors.white54, fontSize: 12)),
+              trailing: FilledButton(
+                onPressed: () => _confirmResetAppData(context),
+                style: FilledButton.styleFrom(backgroundColor: Colors.redAccent),
+                child: const Text('Reset'),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  void _confirmResetAppData(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1A192A),
+        title: const Text('Reset All App Data?'),
+        content: const Text(
+          'This will permanently delete:\n'
+          '• All imported IPTV and M3U playlists\n'
+          '• All custom EPG sources and mappings\n'
+          '• Watch history and favorite lists\n'
+          '• Local caches\n\n'
+          'Your player license will NOT be cancelled.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          FilledButton(
+            onPressed: () async {
+              Navigator.pop(ctx);
+              final prefs = await SharedPreferences.getInstance();
+              await prefs.clear();
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('App data reset. Please restart the app.')),
+                );
+              }
+            },
+            style: FilledButton.styleFrom(backgroundColor: Colors.redAccent),
+            child: const Text('Confirm Reset'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ──────────────────────────────
+  // 9. Help & About Settings
+  // ──────────────────────────────
+  Widget _buildHelpAboutSettings() {
+    return ListView(
+      padding: const EdgeInsets.all(24),
+      children: [
+        _SectionHeader(title: 'Help & About', subtitle: 'Support, backups, remote controls, and documentation'),
+        _SettingsCard(
+          children: [
+            ListTile(
+              leading: const Icon(Icons.info_outline_rounded, color: Color(0xFF6C5CE7)),
+              title: const Text('YesXtream Player',
+                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+              subtitle: Text('v${AppUpdateService.currentVersion} • High Performance IPTV & VOD Engine',
+                  style: const TextStyle(color: Colors.white54)),
+            ),
+            const Divider(color: Color(0xFF26243A), height: 1),
+            ListTile(
+              leading: const Icon(Icons.upload_rounded, color: Colors.white70),
+              title: const Text('Export Backup', style: TextStyle(color: Colors.white)),
+              subtitle: const Text('Save playlists, EPG sources, and favorites to file',
+                  style: TextStyle(color: Colors.white54, fontSize: 12)),
+              trailing: const Icon(Icons.chevron_right_rounded, color: Colors.white54),
+              onTap: () => _exportBackup(context),
+            ),
+            const Divider(color: Color(0xFF26243A), height: 1),
+            ListTile(
+              leading: const Icon(Icons.download_rounded, color: Colors.white70),
+              title: const Text('Import Backup', style: TextStyle(color: Colors.white)),
+              subtitle: const Text('Restore playlists and configuration from a backup file',
+                  style: TextStyle(color: Colors.white54, fontSize: 12)),
+              trailing: const Icon(Icons.chevron_right_rounded, color: Colors.white54),
+              onTap: () => _importBackup(context),
+            ),
+            const Divider(color: Color(0xFF26243A), height: 1),
+            ListTile(
+              leading: const Icon(Icons.gamepad_rounded, color: Colors.white70),
+              title: const Text('Remote & Keyboard Shortcuts', style: TextStyle(color: Colors.white)),
+              subtitle: const Text('View navigation and playback shortcuts',
+                  style: TextStyle(color: Colors.white54, fontSize: 12)),
+              trailing: const Icon(Icons.chevron_right_rounded, color: Colors.white54),
+              onTap: () => _showButtonMappingInfo(context),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  void _showButtonMappingInfo(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1A192A),
+        title: const Text('Remote & Keyboard Shortcuts'),
+        content: const SingleChildScrollView(
+          child: Text(
+            'Navigation Controls:\n'
+            '  ↑ ↓ ← →   Navigate menu and items\n'
+            '  Enter / OK   Select item / Play stream\n'
+            '  Esc / Back   Return to previous screen\n\n'
+            'Video Player Controls:\n'
+            '  Space / OK   Play / Pause\n'
+            '  ← / →   Seek ±10 seconds\n'
+            '  ↑ / ↓   Volume control\n'
+            '  M   Mute / Unmute\n'
+            '  Esc   Exit fullscreen or close drawer',
+            style: TextStyle(color: Colors.white70, height: 1.4),
+          ),
+        ),
+        actions: [
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx),
+            style: FilledButton.styleFrom(backgroundColor: const Color(0xFF6C5CE7)),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SectionHeader extends StatelessWidget {
+  final String title;
+  final String subtitle;
+  const _SectionHeader({required this.title, required this.subtitle});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(title,
+              style: const TextStyle(
+                  color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 4),
+          Text(subtitle, style: const TextStyle(color: Colors.white54, fontSize: 13)),
+        ],
+      ),
+    );
+  }
+}
+
+class _SettingsCard extends StatelessWidget {
+  final List<Widget> children;
+  const _SettingsCard({required this.children});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: const Color(0xFF141322),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFF26243A), width: 1),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: children,
+      ),
+    );
+  }
+}
+
+// ──────────────────────────────────────────
+// Preserved Helper Tiles & Screens
+// ──────────────────────────────────────────
 
 Future<void> _exportBackup(BuildContext context) async {
   try {
@@ -33,10 +1005,10 @@ Future<void> _exportBackup(BuildContext context) async {
     final path = await BackupService.exportBackup();
     if (context.mounted) Navigator.of(context).pop();
     if (context.mounted) {
-      // Offer to save to a user-chosen location or share
       final action = await showDialog<String>(
         context: context,
         builder: (ctx) => AlertDialog(
+          backgroundColor: const Color(0xFF1A192A),
           title: const Text('Backup Created'),
           content: Text('Saved to:\n$path'),
           actions: [
@@ -76,7 +1048,9 @@ Future<void> _exportBackup(BuildContext context) async {
     }
   } catch (e) {
     if (context.mounted) {
-      try { Navigator.of(context).pop(); } catch (_) {}
+      try {
+        Navigator.of(context).pop();
+      } catch (_) {}
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Backup failed: $e'), backgroundColor: Colors.red),
       );
@@ -95,6 +1069,7 @@ Future<void> _importBackup(BuildContext context) async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1A192A),
         title: const Text('Restore Backup?'),
         content: const Text(
           'This will replace all current data with the backup.\n\n'
@@ -123,6 +1098,7 @@ Future<void> _importBackup(BuildContext context) async {
       await showDialog(
         context: context,
         builder: (ctx) => AlertDialog(
+          backgroundColor: const Color(0xFF1A192A),
           title: const Text('Backup Restored'),
           content: Text('$summary\n\nPlease restart the app for changes to take effect.'),
           actions: [
@@ -133,7 +1109,9 @@ Future<void> _importBackup(BuildContext context) async {
     }
   } catch (e) {
     if (context.mounted) {
-      try { Navigator.of(context).pop(); } catch (_) {}
+      try {
+        Navigator.of(context).pop();
+      } catch (_) {}
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Restore failed: $e'), backgroundColor: Colors.red),
       );
@@ -151,7 +1129,7 @@ Future<void> _checkForUpdates(BuildContext context) async {
   final release = await AppUpdateService.checkForUpdate();
 
   if (!context.mounted) return;
-  Navigator.of(context).pop(); // dismiss spinner
+  Navigator.of(context).pop();
 
   if (release == null) {
     ScaffoldMessenger.of(context).showSnackBar(
@@ -170,7 +1148,6 @@ Future<void> _checkForUpdates(BuildContext context) async {
     return;
   }
 
-  // New version available
   final action = await showDialog<String>(
     context: context,
     builder: (ctx) => AlertDialog(
@@ -186,18 +1163,13 @@ Future<void> _checkForUpdates(BuildContext context) async {
           ),
           if (release.body.isNotEmpty)
             Text(
-              release.body.length > 300
-                  ? '${release.body.substring(0, 300)}…'
-                  : release.body,
+              release.body.length > 300 ? '${release.body.substring(0, 300)}…' : release.body,
               style: const TextStyle(fontSize: 13, color: Colors.white70),
             ),
         ],
       ),
       actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(ctx, 'later'),
-          child: const Text('Later'),
-        ),
+        TextButton(onPressed: () => Navigator.pop(ctx, 'later'), child: const Text('Later')),
         if (release.apkDownloadUrl != null)
           FilledButton.icon(
             onPressed: () => Navigator.pop(ctx, 'install'),
@@ -242,7 +1214,9 @@ Future<void> _downloadUpdate(BuildContext context, String apkUrl) async {
   await AppUpdateService.downloadAndInstall(
     apkUrl,
     onProgress: (p) {
-      try { dialogSetState(() => progress = p); } catch (_) {}
+      try {
+        dialogSetState(() => progress = p);
+      } catch (_) {}
     },
     onError: (error) {
       if (context.mounted) {
@@ -253,288 +1227,7 @@ Future<void> _downloadUpdate(BuildContext context, String apkUrl) async {
       }
     },
   );
-  // Dismiss dialog after install intent launches
   if (context.mounted) Navigator.of(context).pop();
-}
-
-class SettingsScreen extends ConsumerStatefulWidget {
-  const SettingsScreen({super.key});
-
-  @override
-  ConsumerState<SettingsScreen> createState() => _SettingsScreenState();
-}
-
-class _SettingsScreenState extends ConsumerState<SettingsScreen> {
-  String _localIp = '';
-
-  @override
-  void initState() {
-    super.initState();
-    _detectLocalIp();
-  }
-
-  Future<void> _detectLocalIp() async {
-    try {
-      final interfaces = await NetworkInterface.list(
-        type: InternetAddressType.IPv4,
-        includeLoopback: false,
-      );
-      for (final iface in interfaces) {
-        for (final addr in iface.addresses) {
-          if (!addr.isLoopback) {
-            if (mounted) setState(() => _localIp = addr.address);
-            return;
-          }
-        }
-      }
-    } catch (_) {}
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final webRemote = ref.watch(webRemoteServerProvider);
-    return CallbackShortcuts(
-      bindings: {
-        const SingleActivator(LogicalKeyboardKey.escape): () {
-          final pf = FocusManager.instance.primaryFocus;
-          if (pf?.context?.findAncestorWidgetOfExactType<EditableText>() != null) {
-            pf!.unfocus();
-            return;
-          }
-          Future.microtask(() {
-            if (Navigator.of(context).canPop()) {
-              Navigator.of(context).pop();
-            } else {
-              context.go('/');
-            }
-          });
-        },
-      },
-      child: Focus(
-        autofocus: !Platform.isAndroid,
-        child: Scaffold(
-      appBar: AppBar(
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
-          onPressed: () {
-            if (Navigator.of(context).canPop()) {
-              Navigator.of(context).pop();
-            } else {
-              context.go('/');
-            }
-          },
-        ),
-        title: const Text('Settings'),
-      ),
-      body: FocusTraversalGroup(
-        child: ListView(
-          children: [
-          _SettingsSection(
-            title: 'Providers',
-            children: [
-              ListTile(
-                autofocus: true,
-                leading: const Icon(Icons.dns_rounded),
-                title: const Text('Manage Providers'),
-                subtitle: const Text('M3U, Xtream Codes, free TV sources'),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () => context.push('/providers'),
-              ),
-            ],
-          ),
-          _SettingsSection(
-            title: 'EPG',
-            children: [
-              ListTile(
-                leading: const Icon(Icons.source_rounded),
-                title: const Text('EPG Sources'),
-                subtitle: const Text('Manage XMLTV feeds (epg.best, etc.)'),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () => _openEpgSourcesScreen(context, ref),
-              ),
-              ListTile(
-                leading: const Icon(Icons.link_rounded),
-                title: const Text('EPG Mappings'),
-                subtitle: const Text('Channel ↔ EPG mapping manager'),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () => context.push('/epg-mapping'),
-              ),
-              _AutoRefreshTile(),
-            ],
-          ),
-          _SettingsSection(
-            title: 'Playback',
-            children: [
-              _UserAgentTile(),
-              _BufferSizeTile(),
-              _FailoverModeTile(),
-            ],
-          ),
-          _SettingsSection(
-            title: 'Display',
-            children: [
-              _LocationTile(),
-              _TimeFormatTile(),
-            ],
-          ),
-          _SettingsSection(
-            title: 'Remote Control',
-            children: [
-              SwitchListTile(
-                secondary: const Icon(Icons.web_rounded),
-                title: const Text('Web Remote'),
-                subtitle: Text(webRemote.isRunning
-                    ? 'Running — open http://${_localIp.isNotEmpty ? _localIp : '<detecting...>'}:${webRemote.port} on your phone'
-                    : 'Allow control from phone browser'),
-                value: webRemote.isRunning,
-                onChanged: (value) async {
-                  if (value) {
-                    await webRemote.start();
-                  } else {
-                    await webRemote.stop();
-                  }
-                  setState(() {});
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.gamepad_rounded),
-                title: const Text('Button Mapping'),
-                subtitle: const Text('Customize remote buttons'),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () => _showButtonMappingInfo(context),
-              ),
-            ],
-          ),
-          _SettingsSection(
-            title: 'Recordings',
-            children: [
-              _RecordingsFolderTile(),
-              ListTile(
-                leading: const Icon(Icons.info_outline_rounded),
-                title: const Text('How it works'),
-                subtitle: const Text('Tap to learn about recording setup'),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () => _showRecordingHelp(context),
-              ),
-            ],
-          ),
-          _SettingsSection(
-            title: 'Backup & Restore',
-            children: [
-              ListTile(
-                leading: const Icon(Icons.upload_rounded),
-                title: const Text('Export Backup'),
-                subtitle: const Text('Save providers, EPG, favorites, API keys'),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () => _exportBackup(context),
-              ),
-              ListTile(
-                leading: const Icon(Icons.download_rounded),
-                title: const Text('Import Backup'),
-                subtitle: const Text('Restore from a .clubtivi file'),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () => _importBackup(context),
-              ),
-            ],
-          ),
-          _SettingsSection(
-            title: 'About',
-            children: [
-              ListTile(
-                leading: const Icon(Icons.info_outline_rounded),
-                title: const Text('clubTivi'),
-                subtitle: Text('v${AppUpdateService.currentVersion} • Open Source • Apache-2.0'),
-              ),
-              ListTile(
-                leading: const Icon(Icons.system_update_rounded),
-                title: const Text('Check for Updates'),
-                subtitle: const Text('Download latest version from GitHub'),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () => _checkForUpdates(context),
-              ),
-              ListTile(
-                leading: const Icon(Icons.code_rounded),
-                title: const Text('Source Code'),
-                subtitle: const Text('github.com/clubanderson/clubTivi'),
-                onTap: () => launchUrl(Uri.parse('https://github.com/clubanderson/clubTivi')),
-              ),
-            ],
-          ),
-          _ShowsApiKeysSection(),
-        ],
-        ),
-      ),
-    ),
-      ),
-    );
-  }
-
-  void _openEpgSourcesScreen(BuildContext context, WidgetRef ref) {
-    Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const _EpgSourcesScreen()),
-    );
-  }
-
-  void _showRecordingHelp(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Recording Setup'),
-        content: const SingleChildScrollView(
-          child: Text(
-            '1. Choose a folder\n'
-            '   Tap "Recording Folder" above and pick any folder on your device.\n'
-            '   clubTivi will save all recordings there.\n\n'
-            '2. Start recording\n'
-            '   While watching a channel, tap the record (●) button in the\n'
-            '   player controls. Recording starts immediately.\n\n'
-            '3. Stop recording\n'
-            '   Tap the record button again, or change channels.\n'
-            '   The file is saved as MP4 in your chosen folder.\n\n'
-            '4. View recordings\n'
-            '   Open "Recordings" in the sidebar to browse and play\n'
-            '   your saved recordings.\n\n'
-            'Tips:\n'
-            '• Make sure you have enough disk space\n'
-            '• Recordings use the original stream quality\n'
-            '• On macOS: the folder picker grants clubTivi access automatically\n'
-            '• On Android: choose a folder in internal storage or SD card',
-          ),
-        ),
-        actions: [
-          FilledButton(onPressed: () => Navigator.pop(ctx), child: const Text('Got it')),
-        ],
-      ),
-    );
-  }
-
-  void _showButtonMappingInfo(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Button Mapping'),
-        content: const Text(
-          'clubTivi supports the following remote controls:\n\n'
-          '• IR remotes (via Android TV / Fire TV)\n'
-          '• Bluetooth gamepads\n'
-          '• Keyboard shortcuts\n'
-          '• Web Remote (enable in Remote Control settings)\n\n'
-          'Default mappings:\n'
-          '  ↑↓←→  Navigate\n'
-          '  Enter/OK  Select / Play\n'
-          '  Esc/Back  Go back\n'
-          '  Space  Play/Pause\n'
-          '  M  Mute\n'
-          '  ↑↓ (in player)  Volume\n'
-          '  ←→ (in player)  Seek ±10s\n\n'
-          'Custom mapping editor coming soon.',
-        ),
-        actions: [
-          FilledButton(onPressed: () => Navigator.pop(ctx), child: const Text('OK')),
-        ],
-      ),
-    );
-  }
 }
 
 class _EpgSourcesScreen extends ConsumerStatefulWidget {
@@ -608,54 +1301,6 @@ class _EpgSourcesScreenState extends ConsumerState<_EpgSourcesScreen> {
     }
   }
 
-  Future<void> _editSource(db.EpgSource source) async {
-    final nameCtrl = TextEditingController(text: source.name);
-    final urlCtrl = TextEditingController(text: source.url);
-    final result = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Edit EPG Source'),
-        content: SizedBox(
-          width: 400,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextFormField(
-                controller: nameCtrl,
-                decoration: const InputDecoration(labelText: 'Name'),
-                autofocus: true,
-              ),
-              const SizedBox(height: 8),
-              TextFormField(
-                controller: urlCtrl,
-                decoration: const InputDecoration(labelText: 'URL'),
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Save'),
-          ),
-        ],
-      ),
-    );
-    if (result == true && mounted) {
-      final database = ref.read(databaseProvider);
-      await database.upsertEpgSource(db.EpgSourcesCompanion(
-        id: Value(source.id),
-        name: Value(nameCtrl.text.trim()),
-        url: Value(urlCtrl.text.trim()),
-        enabled: Value(source.enabled),
-      ));
-      await _loadSources();
-    }
-    nameCtrl.dispose();
-    urlCtrl.dispose();
-  }
-
   Future<void> _showAddDialog() async {
     final result = await showDialog<bool>(
       context: context,
@@ -664,793 +1309,60 @@ class _EpgSourcesScreenState extends ConsumerState<_EpgSourcesScreen> {
     if (result == true && mounted) await _loadSources();
   }
 
-  Future<void> _resetToDefaults() async {
-    try {
-      final service = ref.read(epgRefreshServiceProvider);
-      await service.resetToDefaultSources();
-      if (!mounted) return;
-      await _loadSources();
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('EPG sources reset to defaults')),
-      );
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Reset failed: $e')),
-      );
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
-    return CallbackShortcuts(
-      bindings: {
-        const SingleActivator(LogicalKeyboardKey.escape): () {
-          final pf = FocusManager.instance.primaryFocus;
-          if (pf?.context?.findAncestorWidgetOfExactType<EditableText>() != null) {
-            pf!.unfocus();
-            return;
-          }
-          Future.microtask(() {
-            Navigator.of(context).pop();
-          });
-        },
-      },
-      child: FocusScope(
-        autofocus: true,
-        child: Scaffold(
+    return Scaffold(
+      backgroundColor: const Color(0xFF0A0A0F),
       appBar: AppBar(
+        backgroundColor: const Color(0xFF0D0D14),
         title: const Text('EPG Sources'),
-        actions: [
-          TextButton.icon(
-            onPressed: _resetToDefaults,
-            icon: const Icon(Icons.restart_alt, size: 18),
-            label: const Text('Reset to Defaults'),
-          ),
-        ],
       ),
       floatingActionButton: FloatingActionButton(
+        backgroundColor: const Color(0xFF6C5CE7),
         onPressed: _showAddDialog,
         child: const Icon(Icons.add),
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _error != null
-              ? Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text('Error loading sources: $_error'),
-                      const SizedBox(height: 16),
-                      FilledButton.icon(
-                        onPressed: () {
-                          setState(() { _loading = true; _error = null; });
-                          _loadSources();
-                        },
-                        icon: const Icon(Icons.refresh),
-                        label: const Text('Retry'),
-                      ),
-                    ],
-                  ),
-                )
+              ? Center(child: Text('Error: $_error', style: const TextStyle(color: Colors.white70)))
               : _sources.isEmpty
-          ? Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Text('No EPG sources configured'),
-                  const SizedBox(height: 16),
-                  FilledButton.icon(
-                    onPressed: _showAddDialog,
-                    icon: const Icon(Icons.add),
-                    label: const Text('Add Source'),
-                  ),
-                ],
-              ),
-            )
-          : ListView.builder(
-              itemCount: _sources.length,
-              itemBuilder: (context, index) {
-                final source = _sources[index];
-                final isRefreshing = _refreshing.contains(source.id);
-                final lastRefresh = source.lastRefresh;
-                return ListTile(
-                  leading: Switch(
-                    value: source.enabled,
-                    onChanged: (val) async {
-                      final database = ref.read(databaseProvider);
-                      await database.upsertEpgSource(db.EpgSourcesCompanion(
-                        id: Value(source.id),
-                        name: Value(source.name),
-                        url: Value(source.url),
-                        enabled: Value(val),
-                      ));
-                      await _loadSources();
-                    },
-                  ),
-                  title: Text(
-                    source.name,
-                    style: TextStyle(
-                      color: source.enabled ? null : Colors.white38,
-                    ),
-                  ),
-                  subtitle: Text(
-                    '${source.url}\n'
-                    'Last refresh: ${lastRefresh != null ? _formatTime(lastRefresh) : 'Never'}',
-                  ),
-                  isThreeLine: true,
-                  trailing: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      IconButton(
-                        icon: const Icon(Icons.edit_outlined),
-                        tooltip: 'Edit source',
-                        onPressed: () => _editSource(source),
-                      ),
-                      if (isRefreshing)
-                        const SizedBox(
-                          width: 24,
-                          height: 24,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      else
-                        IconButton(
-                          icon: const Icon(Icons.refresh),
-                          onPressed: () => _refreshSource(source.id),
-                        ),
-                      IconButton(
-                        icon: const Icon(Icons.delete_outline),
-                        onPressed: () => _deleteSource(source.id),
-                      ),
-                    ],
-                  ),
-                );
-              },
-            ),
-    ),
-    ),
-    );
-  }
-
-  String _formatTime(DateTime dt) {
-    final diff = DateTime.now().difference(dt);
-    if (diff.inMinutes < 1) return 'Just now';
-    if (diff.inHours < 1) return '${diff.inMinutes}m ago';
-    if (diff.inDays < 1) return '${diff.inHours}h ago';
-    return '${diff.inDays}d ago';
-  }
-}
-
-class _ShowsApiKeysSection extends ConsumerStatefulWidget {
-  @override
-  ConsumerState<_ShowsApiKeysSection> createState() => _ShowsApiKeysSectionState();
-}
-
-class _ShowsApiKeysSectionState extends ConsumerState<_ShowsApiKeysSection> {
-  final _traktCtrl = TextEditingController();
-  final _tmdbCtrl = TextEditingController();
-  bool _loaded = false;
-  bool _traktVerifying = false;
-  bool? _traktVerified;
-  bool _tmdbVerifying = false;
-  bool? _tmdbVerified;
-
-  @override
-  void dispose() {
-    _traktCtrl.dispose();
-    _tmdbCtrl.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final keys = ref.watch(showsApiKeysProvider);
-    if (!_loaded && (keys.traktClientId.isNotEmpty || keys.tmdbApiKey.isNotEmpty)) {
-      _traktCtrl.text = keys.traktClientId;
-      _tmdbCtrl.text = keys.tmdbApiKey;
-      _loaded = true;
-    }
-
-    final debridCount = keys.configuredDebridCount;
-
-    return _SettingsSection(
-      title: 'Shows & Movies',
-      children: [
-        _ApiKeyCard(
-          title: 'Trakt',
-          subtitle: keys.hasTraktKey ? 'Configured ✓' : 'Not configured',
-          isConfigured: keys.hasTraktKey,
-          icon: Icons.tv_rounded,
-          controller: _traktCtrl,
-          tokenLabel: 'Client ID',
-          tokenHint: 'trakt.tv/oauth/applications',
-          tokenUrl: 'https://trakt.tv/oauth/applications',
-          isVerifying: _traktVerifying,
-          verifyResult: _traktVerified,
-          onSave: () => _saveTrakt(),
-          onVerify: () => _verifyTrakt(),
-          onClear: () {
-            _traktCtrl.clear();
-            _saveTrakt();
-          },
-        ),
-        _ApiKeyCard(
-          title: 'TMDB',
-          subtitle: keys.hasTmdbKey ? 'Configured ✓' : 'Not configured',
-          isConfigured: keys.hasTmdbKey,
-          icon: Icons.image_rounded,
-          controller: _tmdbCtrl,
-          tokenLabel: 'API Key',
-          tokenHint: 'themoviedb.org/settings/api',
-          tokenUrl: 'https://www.themoviedb.org/settings/api',
-          isVerifying: _tmdbVerifying,
-          verifyResult: _tmdbVerified,
-          onSave: () => _saveTmdb(),
-          onVerify: () => _verifyTmdb(),
-          onClear: () {
-            _tmdbCtrl.clear();
-            _saveTmdb();
-          },
-        ),
-        ListTile(
-          leading: const Icon(Icons.cloud_download_rounded),
-          title: const Text('Debrid Services'),
-          subtitle: Text(
-            debridCount > 0
-                ? '$debridCount service${debridCount > 1 ? 's' : ''} configured'
-                : 'Not configured',
-            style: TextStyle(
-              fontSize: 12,
-              color: debridCount > 0 ? Colors.green : Colors.white38,
-            ),
-          ),
-          trailing: const Icon(Icons.chevron_right),
-          onTap: () => context.push('/debrid-services'),
-        ),
-      ],
-    );
-  }
-
-  Future<void> _saveTrakt() async {
-    final keys = ref.read(showsApiKeysProvider);
-    await ref.read(showsApiKeysProvider.notifier).save(
-      traktClientId: _traktCtrl.text.trim(),
-      tmdbApiKey: keys.tmdbApiKey,
-      debridTokens: keys.debridTokens,
-    );
-    ref.invalidate(showsRepositoryProvider);
-    if (mounted) {
-      setState(() => _traktVerified = null);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Trakt key saved')),
-      );
-    }
-  }
-
-  Future<void> _saveTmdb() async {
-    final keys = ref.read(showsApiKeysProvider);
-    await ref.read(showsApiKeysProvider.notifier).save(
-      traktClientId: keys.traktClientId,
-      tmdbApiKey: _tmdbCtrl.text.trim(),
-      debridTokens: keys.debridTokens,
-    );
-    ref.invalidate(showsRepositoryProvider);
-    if (mounted) {
-      setState(() => _tmdbVerified = null);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('TMDB key saved')),
-      );
-    }
-  }
-
-  Future<void> _verifyTrakt() async {
-    final token = _traktCtrl.text.trim();
-    if (token.isEmpty) return;
-    setState(() { _traktVerifying = true; _traktVerified = null; });
-    try {
-      final client = TraktClient(clientId: token);
-      final results = await client.getTrendingShows(limit: 1);
-      if (mounted) setState(() => _traktVerified = results.isNotEmpty);
-    } catch (_) {
-      if (mounted) setState(() => _traktVerified = false);
-    } finally {
-      if (mounted) setState(() => _traktVerifying = false);
-    }
-  }
-
-  Future<void> _verifyTmdb() async {
-    final token = _tmdbCtrl.text.trim();
-    if (token.isEmpty) return;
-    setState(() { _tmdbVerifying = true; _tmdbVerified = null; });
-    try {
-      final client = TmdbClient(apiKey: token);
-      final results = await client.getTrendingTv();
-      if (mounted) setState(() => _tmdbVerified = results.isNotEmpty);
-    } catch (_) {
-      if (mounted) setState(() => _tmdbVerified = false);
-    } finally {
-      if (mounted) setState(() => _tmdbVerifying = false);
-    }
-  }
-
-}
-
-/// Reusable card for API key configuration (matches debrid card style).
-class _ApiKeyCard extends StatefulWidget {
-  final String title;
-  final String subtitle;
-  final bool isConfigured;
-  final IconData icon;
-  final TextEditingController controller;
-  final String tokenLabel;
-  final String tokenHint;
-  final String tokenUrl;
-  final bool isVerifying;
-  final bool? verifyResult;
-  final VoidCallback onSave;
-  final VoidCallback onVerify;
-  final VoidCallback onClear;
-
-  const _ApiKeyCard({
-    required this.title,
-    required this.subtitle,
-    required this.isConfigured,
-    required this.icon,
-    required this.controller,
-    required this.tokenLabel,
-    required this.tokenHint,
-    required this.tokenUrl,
-    required this.isVerifying,
-    this.verifyResult,
-    required this.onSave,
-    required this.onVerify,
-    required this.onClear,
-  });
-
-  @override
-  State<_ApiKeyCard> createState() => _ApiKeyCardState();
-}
-
-class _ApiKeyCardState extends State<_ApiKeyCard> {
-  bool _expanded = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _expanded = Platform.isAndroid ? false : !widget.isConfigured;
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final hasToken = widget.controller.text.trim().isNotEmpty;
-
-    return Card(
-      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-      color: const Color(0xFF16213E),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: Column(
-        children: [
-          ListTile(
-            leading: Icon(
-              widget.icon,
-              color: widget.isConfigured
-                  ? const Color(0xFF6C5CE7)
-                  : Colors.white30,
-            ),
-            title: Text(
-              widget.title,
-              style: TextStyle(
-                fontWeight: FontWeight.w600,
-                color: widget.isConfigured ? Colors.white : Colors.white70,
-              ),
-            ),
-            subtitle: Text(
-              widget.subtitle,
-              style: TextStyle(
-                fontSize: 12,
-                color: widget.isConfigured ? Colors.green : Colors.white38,
-              ),
-            ),
-            trailing: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                if (widget.isConfigured)
-                  IconButton(
-                    icon: const Icon(Icons.delete_outline, size: 20,
-                        color: Colors.redAccent),
-                    tooltip: 'Remove',
-                    onPressed: widget.onClear,
-                  ),
-                Icon(
-                  _expanded
-                      ? Icons.expand_less_rounded
-                      : Icons.expand_more_rounded,
-                  color: Colors.white38,
-                ),
-              ],
-            ),
-            onTap: () => setState(() => _expanded = !_expanded),
-          ),
-          if (_expanded)
-            FocusTraversalGroup(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    TextFormField(
-                      controller: widget.controller,
-                      obscureText: true,
-                      textInputAction: TextInputAction.done,
-                      onFieldSubmitted: (_) {
-                        if (widget.controller.text.trim().isNotEmpty) {
-                          widget.onSave();
-                        }
-                      },
-                      decoration: InputDecoration(
-                        labelText: widget.tokenLabel,
-                        hintText: widget.tokenHint,
-                        prefixIcon: const Icon(Icons.vpn_key, size: 20),
-                        suffixIcon: _buildSuffixIcon(),
-                        border: const OutlineInputBorder(),
-                        isDense: true,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: FilledButton.icon(
-                            onPressed: hasToken ? widget.onSave : null,
-                            icon: const Icon(Icons.save, size: 18),
-                            label: const Text('Save'),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        OutlinedButton.icon(
-                          onPressed: hasToken && !widget.isVerifying
-                              ? widget.onVerify
-                              : null,
-                          icon: widget.isVerifying
-                              ? const SizedBox(
-                                  width: 16, height: 16,
+                  ? const Center(child: Text('No EPG sources configured', style: TextStyle(color: Colors.white38)))
+                  : ListView.builder(
+                      itemCount: _sources.length,
+                      itemBuilder: (context, index) {
+                        final source = _sources[index];
+                        final isRefreshing = _refreshing.contains(source.id);
+                        return ListTile(
+                          title: Text(source.name, style: const TextStyle(color: Colors.white)),
+                          subtitle: Text(source.url, style: const TextStyle(color: Colors.white38)),
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              if (isRefreshing)
+                                const SizedBox(
+                                  width: 20,
+                                  height: 20,
                                   child: CircularProgressIndicator(strokeWidth: 2),
                                 )
-                              : const Icon(Icons.verified_outlined, size: 18),
-                          label: const Text('Verify'),
-                        ),
-                        const SizedBox(width: 8),
-                        OutlinedButton.icon(
-                          onPressed: () {
-                            final url = Uri.parse(widget.tokenUrl);
-                            launchUrl(url, mode: LaunchMode.externalApplication);
-                          },
-                          icon: const Icon(Icons.open_in_new, size: 16),
-                          label: const Text('Get Key'),
-                        ),
-                      ],
+                              else
+                                IconButton(
+                                  icon: const Icon(Icons.refresh, color: Colors.white70),
+                                  onPressed: () => _refreshSource(source.id),
+                                ),
+                              IconButton(
+                                icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
+                                onPressed: () => _deleteSource(source.id),
+                              ),
+                            ],
+                          ),
+                        );
+                      },
                     ),
-                  ],
-                ),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-
-  Widget? _buildSuffixIcon() {
-    if (widget.isVerifying) {
-      return const Padding(
-        padding: EdgeInsets.all(12),
-        child: SizedBox(
-          width: 18, height: 18,
-          child: CircularProgressIndicator(strokeWidth: 2),
-        ),
-      );
-    }
-    if (widget.verifyResult == true) {
-      return const Icon(Icons.check_circle, color: Colors.green, size: 20);
-    }
-    if (widget.verifyResult == false) {
-      return const Icon(Icons.error, color: Colors.redAccent, size: 20);
-    }
-    if (widget.isConfigured) {
-      return const Icon(Icons.check_circle, color: Colors.green, size: 20);
-    }
-    return null;
-  }
-}
-
-class _SettingsSection extends StatelessWidget {
-  final String title;
-  final List<Widget> children;
-
-  const _SettingsSection({required this.title, required this.children});
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 24, 16, 8),
-          child: Text(
-            title,
-            style: TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
-              color: Theme.of(context).colorScheme.primary,
-              letterSpacing: 0.5,
-            ),
-          ),
-        ),
-        ...children,
-      ],
     );
   }
 }
 
-class _UserAgentTile extends StatefulWidget {
-  @override
-  State<_UserAgentTile> createState() => _UserAgentTileState();
-}
-
-class _UserAgentTileState extends State<_UserAgentTile> {
-  String _userAgent = 'Default';
-  static const _key = 'playback_user_agent';
-  static const _presets = [
-    'Default',
-    'VLC/3.0',
-    'Kodi/20.0',
-    'ExoPlayer',
-    'Lavf/60',
-    'Mozilla/5.0',
-  ];
-
-  @override
-  void initState() {
-    super.initState();
-    SharedPreferences.getInstance().then((prefs) {
-      if (mounted) setState(() => _userAgent = prefs.getString(_key) ?? 'Default');
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return ListTile(
-      leading: const Icon(Icons.badge_rounded),
-      title: const Text('User Agent'),
-      subtitle: Text(_userAgent, style: const TextStyle(color: Colors.purpleAccent)),
-      trailing: const Icon(Icons.chevron_right),
-      onTap: () async {
-        final controller = TextEditingController(
-          text: _userAgent == 'Default' ? '' : _userAgent,
-        );
-        final picked = await showDialog<String>(
-          context: context,
-          builder: (ctx) => AlertDialog(
-            title: const Text('User Agent'),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(
-                  controller: controller,
-                  decoration: const InputDecoration(
-                    hintText: 'Enter custom user agent...',
-                    isDense: true,
-                  ),
-                ),
-                const SizedBox(height: 16),
-                const Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text('Presets', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
-                ),
-                const SizedBox(height: 8),
-                ...List.generate(_presets.length, (i) => ListTile(
-                  dense: true,
-                  title: Text(_presets[i]),
-                  selected: _userAgent == _presets[i],
-                  onTap: () => Navigator.pop(ctx, _presets[i]),
-                )),
-              ],
-            ),
-            actions: [
-              TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-              FilledButton(
-                onPressed: () {
-                  final custom = controller.text.trim();
-                  Navigator.pop(ctx, custom.isEmpty ? 'Default' : custom);
-                },
-                child: const Text('Save'),
-              ),
-            ],
-          ),
-        );
-        if (picked != null) {
-          final prefs = await SharedPreferences.getInstance();
-          await prefs.setString(_key, picked);
-          setState(() => _userAgent = picked);
-        }
-      },
-    );
-  }
-}
-
-class _LocationTile extends ConsumerStatefulWidget {
-  @override
-  ConsumerState<_LocationTile> createState() => _LocationTileState();
-}
-
-class _LocationTileState extends ConsumerState<_LocationTile> {
-  String _zipcode = '';
-  String _cityName = '';
-
-  @override
-  void initState() {
-    super.initState();
-    SharedPreferences.getInstance().then((prefs) {
-      if (mounted) {
-        setState(() {
-          _zipcode = prefs.getString(weatherZipKey) ?? '';
-          _cityName = prefs.getString(weatherCityKey) ?? '';
-        });
-      }
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final subtitle = _zipcode.isNotEmpty
-        ? '$_zipcode${_cityName.isNotEmpty ? ' — $_cityName' : ''}'
-        : 'Auto-detected from IP';
-    return ListTile(
-      leading: const Icon(Icons.location_on_rounded),
-      title: const Text('Weather Location'),
-      subtitle: Text(subtitle),
-      trailing: const Icon(Icons.chevron_right),
-      onTap: () => _showLocationDialog(),
-    );
-  }
-
-  Future<void> _showLocationDialog() async {
-    final controller = TextEditingController(text: _zipcode);
-    final result = await showDialog<String>(
-      context: context,
-      builder: (ctx) {
-        String? error;
-        bool loading = false;
-        return StatefulBuilder(
-          builder: (ctx, setDialogState) => AlertDialog(
-            title: const Text('Weather Location'),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'Enter a zip code or city name. Leave empty to auto-detect from your IP address.',
-                  style: TextStyle(fontSize: 13, color: Colors.white70),
-                ),
-                const SizedBox(height: 16),
-                TextField(
-                  controller: controller,
-                  autofocus: true,
-                  decoration: InputDecoration(
-                    labelText: 'Zip code or city',
-                    hintText: 'e.g. 48103 or Ann Arbor',
-                    prefixIcon: const Icon(Icons.search_rounded),
-                    errorText: error,
-                    border: const OutlineInputBorder(),
-                  ),
-                  textInputAction: TextInputAction.done,
-                  onSubmitted: (_) async {
-                    final val = controller.text.trim();
-                    if (val.isEmpty) {
-                      Navigator.pop(ctx, '');
-                      return;
-                    }
-                    setDialogState(() { loading = true; error = null; });
-                    final geo = await geocodeZipcode(val);
-                    if (geo != null) {
-                      Navigator.pop(ctx, val);
-                    } else {
-                      setDialogState(() { loading = false; error = 'Could not find location'; });
-                    }
-                  },
-                ),
-                if (loading) ...[
-                  const SizedBox(height: 12),
-                  const Center(child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))),
-                ],
-              ],
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(ctx, ''),
-                child: const Text('Auto-detect'),
-              ),
-              TextButton(
-                onPressed: () => Navigator.pop(ctx),
-                child: const Text('Cancel'),
-              ),
-              FilledButton(
-                onPressed: loading ? null : () async {
-                  final val = controller.text.trim();
-                  if (val.isEmpty) {
-                    Navigator.pop(ctx, '');
-                    return;
-                  }
-                  setDialogState(() { loading = true; error = null; });
-                  final geo = await geocodeZipcode(val);
-                  if (geo != null) {
-                    // Save the resolved city name
-                    final prefs = await SharedPreferences.getInstance();
-                    await prefs.setString(weatherCityKey, geo['city'] as String);
-                    if (ctx.mounted) Navigator.pop(ctx, val);
-                  } else {
-                    setDialogState(() { loading = false; error = 'Could not find location'; });
-                  }
-                },
-                child: const Text('Save'),
-              ),
-            ],
-          ),
-        );
-      },
-    );
-
-    if (result == null) return; // cancelled
-
-    final prefs = await SharedPreferences.getInstance();
-    if (result.isEmpty) {
-      // Clear saved location → auto-detect
-      await prefs.remove(weatherZipKey);
-      await prefs.remove(weatherCityKey);
-      setState(() { _zipcode = ''; _cityName = ''; });
-    } else {
-      await prefs.setString(weatherZipKey, result);
-      final city = prefs.getString(weatherCityKey) ?? '';
-      setState(() { _zipcode = result; _cityName = city; });
-    }
-    // Trigger weather refresh
-    ref.read(weatherProvider.notifier).refresh();
-  }
-}
-
-class _TimeFormatTile extends StatefulWidget {
-  @override
-  State<_TimeFormatTile> createState() => _TimeFormatTileState();
-}
-
-class _TimeFormatTileState extends State<_TimeFormatTile> {
-  bool _use24Hour = false;
-
-  @override
-  void initState() {
-    super.initState();
-    SharedPreferences.getInstance().then((prefs) {
-      if (mounted) {
-        setState(() => _use24Hour = prefs.getBool('use_24_hour_time') ?? false);
-      }
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return SwitchListTile(
-      secondary: const Icon(Icons.schedule_rounded),
-      title: const Text('24-Hour Time'),
-      subtitle: Text(_use24Hour ? '14:30' : '2:30 PM'),
-      value: _use24Hour,
-      onChanged: (value) async {
-        final prefs = await SharedPreferences.getInstance();
-        await prefs.setBool('use_24_hour_time', value);
-        setState(() => _use24Hour = value);
-      },
-    );
-  }
-}
 
 class _AutoRefreshTile extends StatefulWidget {
   @override
@@ -1458,47 +1370,45 @@ class _AutoRefreshTile extends StatefulWidget {
 }
 
 class _AutoRefreshTileState extends State<_AutoRefreshTile> {
-  int _hours = 12;
-  static const _key = 'epg_auto_refresh_hours';
-  static const _options = [1, 4, 6, 12, 24, 48];
+  int _intervalHours = 24;
 
   @override
   void initState() {
     super.initState();
-    SharedPreferences.getInstance().then((prefs) {
-      if (mounted) setState(() => _hours = prefs.getInt(_key) ?? 12);
+    _load();
+  }
+
+  Future<void> _load() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      _intervalHours = prefs.getInt('epg_auto_refresh_interval_hours') ?? 24;
     });
   }
 
   @override
   Widget build(BuildContext context) {
     return ListTile(
-      leading: const Icon(Icons.refresh_rounded),
-      title: const Text('Auto-Refresh'),
-      subtitle: Text('Every $_hours hours'),
-      trailing: const Icon(Icons.chevron_right),
-      onTap: () async {
-        final picked = await showDialog<int>(
-          context: context,
-          builder: (ctx) => SimpleDialog(
-            title: const Text('Auto-Refresh Interval'),
-            children: [
-              for (final h in _options)
-                RadioListTile<int>(
-                  title: Text('Every $h hour${h == 1 ? '' : 's'}'),
-                  value: h,
-                  groupValue: _hours,
-                  onChanged: (v) => Navigator.pop(ctx, v),
-                ),
-            ],
-          ),
-        );
-        if (picked != null) {
-          final prefs = await SharedPreferences.getInstance();
-          await prefs.setInt(_key, picked);
-          setState(() => _hours = picked);
-        }
-      },
+      leading: const Icon(Icons.sync_rounded, color: Colors.white70),
+      title: const Text('EPG auto-refresh interval', style: TextStyle(color: Colors.white)),
+      trailing: DropdownButton<int>(
+        value: _intervalHours,
+        dropdownColor: const Color(0xFF1E1C2E),
+        style: const TextStyle(color: Colors.white),
+        underline: const SizedBox.shrink(),
+        items: const [
+          DropdownMenuItem(value: 6, child: Text('Every 6 hours')),
+          DropdownMenuItem(value: 12, child: Text('Every 12 hours')),
+          DropdownMenuItem(value: 24, child: Text('Every 24 hours')),
+          DropdownMenuItem(value: 48, child: Text('Every 48 hours')),
+        ],
+        onChanged: (val) async {
+          if (val != null) {
+            final prefs = await SharedPreferences.getInstance();
+            await prefs.setInt('epg_auto_refresh_interval_hours', val);
+            setState(() => _intervalHours = val);
+          }
+        },
+      ),
     );
   }
 }
@@ -1509,55 +1419,44 @@ class _BufferSizeTile extends StatefulWidget {
 }
 
 class _BufferSizeTileState extends State<_BufferSizeTile> {
-  String _buffer = 'Auto';
-  static const _key = 'playback_buffer_size';
-  static const _options = {
-    'Auto': 'Auto',
-    'None': 'None',
-    '1 MB (Small)': '1',
-    '2 MB (Small)': '2',
-    '4 MB (Medium)': '4',
-    '8 MB (Large)': '8',
-    '16 MB (XL)': '16',
-  };
+  int _bufferSeconds = 15;
 
   @override
   void initState() {
     super.initState();
-    SharedPreferences.getInstance().then((prefs) {
-      if (mounted) setState(() => _buffer = prefs.getString(_key) ?? 'Auto');
+    _load();
+  }
+
+  Future<void> _load() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      _bufferSeconds = prefs.getInt('player_buffer_seconds') ?? 15;
     });
   }
 
   @override
   Widget build(BuildContext context) {
     return ListTile(
-      leading: const Icon(Icons.speed_rounded),
-      title: const Text('Buffer Size'),
-      subtitle: Text(_buffer),
-      trailing: const Icon(Icons.chevron_right),
-      onTap: () async {
-        final picked = await showDialog<String>(
-          context: context,
-          builder: (ctx) => SimpleDialog(
-            title: const Text('Buffer Size'),
-            children: [
-              for (final entry in _options.entries)
-                RadioListTile<String>(
-                  title: Text(entry.key),
-                  value: entry.key,
-                  groupValue: _buffer,
-                  onChanged: (v) => Navigator.pop(ctx, v),
-                ),
-            ],
-          ),
-        );
-        if (picked != null) {
-          final prefs = await SharedPreferences.getInstance();
-          await prefs.setString(_key, picked);
-          setState(() => _buffer = picked);
-        }
-      },
+      leading: const Icon(Icons.memory_rounded, color: Colors.white70),
+      title: const Text('Stream buffer size', style: TextStyle(color: Colors.white)),
+      trailing: DropdownButton<int>(
+        value: _bufferSeconds,
+        dropdownColor: const Color(0xFF1E1C2E),
+        style: const TextStyle(color: Colors.white),
+        underline: const SizedBox.shrink(),
+        items: const [
+          DropdownMenuItem(value: 5, child: Text('5s (Low latency)')),
+          DropdownMenuItem(value: 15, child: Text('15s (Balanced)')),
+          DropdownMenuItem(value: 30, child: Text('30s (Smooth)')),
+        ],
+        onChanged: (val) async {
+          if (val != null) {
+            final prefs = await SharedPreferences.getInstance();
+            await prefs.setInt('player_buffer_seconds', val);
+            setState(() => _bufferSeconds = val);
+          }
+        },
+      ),
     );
   }
 }
@@ -1568,203 +1467,93 @@ class _FailoverModeTile extends StatefulWidget {
 }
 
 class _FailoverModeTileState extends State<_FailoverModeTile> {
-  String _mode = 'cold';
-  static const _key = 'failover_mode';
-  static const _options = {
-    'cold': 'Cold (switch on buffering)',
-    'warm': 'Warm (background probes)',
-    'off': 'Off',
-  };
+  bool _enabled = true;
 
   @override
   void initState() {
     super.initState();
-    SharedPreferences.getInstance().then((prefs) {
-      if (mounted) setState(() => _mode = prefs.getString(_key) ?? 'cold');
+    _load();
+  }
+
+  Future<void> _load() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      _enabled = prefs.getBool('failover_enabled') ?? true;
     });
   }
 
   @override
   Widget build(BuildContext context) {
-    return ListTile(
-      leading: const Icon(Icons.swap_horizontal_circle_rounded),
-      title: const Text('Failover Mode'),
-      subtitle: Text(_options[_mode] ?? _mode),
-      trailing: const Icon(Icons.chevron_right),
-      onTap: () async {
-        final picked = await showDialog<String>(
-          context: context,
-          builder: (ctx) => SimpleDialog(
-            title: const Text('Failover Mode'),
-            children: [
-              for (final entry in _options.entries)
-                RadioListTile<String>(
-                  title: Text(entry.value),
-                  subtitle: entry.key == 'warm'
-                      ? const Text('Monitors alternate streams in background', style: TextStyle(fontSize: 12))
-                      : entry.key == 'cold'
-                          ? const Text('Switches only when buffering detected', style: TextStyle(fontSize: 12))
-                          : null,
-                  value: entry.key,
-                  groupValue: _mode,
-                  onChanged: (v) => Navigator.pop(ctx, v),
-                ),
-            ],
-          ),
-        );
-        if (picked != null) {
-          final prefs = await SharedPreferences.getInstance();
-          await prefs.setString(_key, picked);
-          setState(() => _mode = picked);
-        }
+    return SwitchListTile(
+      secondary: const Icon(Icons.alt_route_rounded, color: Colors.white70),
+      title: const Text('Stream auto-failover', style: TextStyle(color: Colors.white)),
+      subtitle: const Text('Automatically switch to backup stream when buffering stalls',
+          style: TextStyle(color: Colors.white54, fontSize: 12)),
+      value: _enabled,
+      activeColor: const Color(0xFF6C5CE7),
+      onChanged: (val) async {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setBool('failover_enabled', val);
+        setState(() => _enabled = val);
       },
     );
   }
 }
 
-class _RecordingsFolderTile extends StatefulWidget {
+class _UserAgentTile extends StatefulWidget {
   @override
-  State<_RecordingsFolderTile> createState() => _RecordingsFolderTileState();
+  State<_UserAgentTile> createState() => _UserAgentTileState();
 }
 
-class _RecordingsFolderTileState extends State<_RecordingsFolderTile> {
-  String? _folder;
-  static const _key = 'recordings_folder';
+class _UserAgentTileState extends State<_UserAgentTile> {
+  String _userAgent = 'IPTVSmartersPlayer';
 
   @override
   void initState() {
     super.initState();
-    SharedPreferences.getInstance().then((prefs) {
-      if (mounted) setState(() => _folder = prefs.getString(_key));
+    _load();
+  }
+
+  Future<void> _load() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      _userAgent = prefs.getString('custom_user_agent') ?? 'IPTVSmartersPlayer';
     });
-  }
-
-  Future<void> _pickLocal() async {
-    final result = await FilePicker.platform.getDirectoryPath(
-      dialogTitle: 'Choose where to save recordings',
-    );
-    if (result != null) {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(_key, result);
-      setState(() => _folder = result);
-    }
-  }
-
-  Future<void> _enterNetworkPath(BuildContext context) async {
-    final controller = TextEditingController(
-      text: _folder != null && _folder!.startsWith('smb://') || 
-            _folder != null && _folder!.startsWith('nfs://') ||
-            _folder != null && _folder!.startsWith('afp://') ||
-            _folder != null && _folder!.startsWith('ftp://') ||
-            _folder != null && _folder!.startsWith('webdav://')
-          ? _folder : '',
-    );
-    final path = await showDialog<String>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Network Storage'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'Enter the network path to your shared folder:',
-              style: TextStyle(fontSize: 13),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: controller,
-              autofocus: true,
-              decoration: const InputDecoration(
-                hintText: 'smb://192.168.1.100/Recordings',
-                isDense: true,
-              ),
-              onSubmitted: (v) => Navigator.pop(ctx, v.trim()),
-            ),
-            const SizedBox(height: 16),
-            const Text('Supported protocols:', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
-            const SizedBox(height: 4),
-            const Text('• SMB — smb://server/share  (Windows/NAS)', style: TextStyle(fontSize: 11, color: Colors.white54)),
-            const Text('• NFS — nfs://server/path  (Linux/NAS)', style: TextStyle(fontSize: 11, color: Colors.white54)),
-            const Text('• AFP — afp://server/share  (Apple)', style: TextStyle(fontSize: 11, color: Colors.white54)),
-            const Text('• FTP — ftp://user:pass@server/path', style: TextStyle(fontSize: 11, color: Colors.white54)),
-            const Text('• WebDAV — webdav://server/path', style: TextStyle(fontSize: 11, color: Colors.white54)),
-          ],
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, controller.text.trim()),
-            child: const Text('Save'),
-          ),
-        ],
-      ),
-    );
-    if (path != null && path.isNotEmpty) {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(_key, path);
-      setState(() => _folder = path);
-    }
   }
 
   @override
   Widget build(BuildContext context) {
     return ListTile(
-      leading: const Icon(Icons.folder_rounded),
-      title: const Text('Recording Location'),
-      subtitle: Text(
-        _folder ?? 'Not set — tap to choose',
-        style: TextStyle(
-          color: _folder != null ? Colors.purpleAccent : Colors.white38,
-          fontSize: 13,
-        ),
-        overflow: TextOverflow.ellipsis,
-      ),
-      trailing: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (_folder != null)
-            IconButton(
-              icon: const Icon(Icons.close_rounded, size: 18),
-              tooltip: 'Clear',
-              onPressed: () async {
-                final prefs = await SharedPreferences.getInstance();
-                await prefs.remove(_key);
-                setState(() => _folder = null);
-              },
-            ),
-          const Icon(Icons.chevron_right),
-        ],
-      ),
+      leading: const Icon(Icons.http_rounded, color: Colors.white70),
+      title: const Text('HTTP User-Agent', style: TextStyle(color: Colors.white)),
+      subtitle: Text(_userAgent, style: const TextStyle(color: Colors.white54, fontSize: 12)),
+      trailing: const Icon(Icons.edit_rounded, color: Colors.white54, size: 20),
       onTap: () async {
-        final choice = await showDialog<String>(
+        final ctrl = TextEditingController(text: _userAgent);
+        final result = await showDialog<String>(
           context: context,
-          builder: (ctx) => SimpleDialog(
-            title: const Text('Recording Location'),
-            children: [
-              SimpleDialogOption(
-                onPressed: () => Navigator.pop(ctx, 'local'),
-                child: const Row(children: [
-                  Icon(Icons.folder_rounded, size: 20),
-                  SizedBox(width: 12),
-                  Text('Local Folder'),
-                ]),
-              ),
-              SimpleDialogOption(
-                onPressed: () => Navigator.pop(ctx, 'network'),
-                child: const Row(children: [
-                  Icon(Icons.lan_rounded, size: 20),
-                  SizedBox(width: 12),
-                  Text('Network Share (SMB/NFS/AFP/FTP)'),
-                ]),
+          builder: (ctx) => AlertDialog(
+            backgroundColor: const Color(0xFF1A192A),
+            title: const Text('User-Agent Header'),
+            content: TextField(
+              controller: ctrl,
+              style: const TextStyle(color: Colors.white),
+              decoration: const InputDecoration(border: OutlineInputBorder()),
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+              FilledButton(
+                onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
+                style: FilledButton.styleFrom(backgroundColor: const Color(0xFF6C5CE7)),
+                child: const Text('Save'),
               ),
             ],
           ),
         );
-        if (choice == 'local') {
-          await _pickLocal();
-        } else if (choice == 'network' && context.mounted) {
-          await _enterNetworkPath(context);
+        if (result != null && mounted) {
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setString('custom_user_agent', result);
+          setState(() => _userAgent = result);
         }
       },
     );

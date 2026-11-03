@@ -4,15 +4,15 @@ import '../core/platform_info.dart';
 import 'router.dart';
 import 'theme.dart';
 
-class ClubTiviApp extends StatelessWidget {
-  const ClubTiviApp({super.key});
+class YesXtreamApp extends StatelessWidget {
+  const YesXtreamApp({super.key});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp.router(
-      title: 'clubTivi',
+      title: 'YesXtream',
       debugShowCheckedModeBanner: false,
-      theme: ClubTiviTheme.dark,
+      theme: YesXtreamTheme.dark,
       routerConfig: router,
       builder: (context, child) {
         // Detect TV mode from the first MediaQuery context
@@ -22,3 +22,5 @@ class ClubTiviApp extends StatelessWidget {
     );
   }
 }
+
+typedef ClubTiviApp = YesXtreamApp;

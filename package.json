@@ -1,0 +1,12 @@
+{
+  "name": "yesxtream",
+  "version": "0.4.0",
+  "private": true,
+  "description": "YesXtream - Premium IPTV player with intelligent EPG mapping, multi-provider stream failover, and remote control support.",
+  "scripts": {
+    "app:run": "flutter run",
+    "app:build": "flutter build",
+    "app:clean": "flutter clean",
+    "test": "flutter test"
+  }
+}

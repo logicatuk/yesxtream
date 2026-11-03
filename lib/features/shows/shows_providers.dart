@@ -32,9 +32,7 @@ final showsRepositoryProvider = FutureProvider<ShowsRepository>((ref) async {
     trakt: keys.hasTraktKey
         ? TraktClient(clientId: keys.traktClientId)
         : null,
-    tmdb: keys.hasTmdbKey
-        ? TmdbClient(apiKey: keys.tmdbApiKey)
-        : null,
+    tmdb: TmdbClient.defaultClient,
     debrid: debrid,
     torrentSearch: TorrentSearchClient(),
   );
@@ -242,7 +240,7 @@ class ShowsApiKeys {
   bool get isConfigured =>
       traktClientId.isNotEmpty && tmdbApiKey.isNotEmpty && hasAnyDebridKey;
   bool get hasTraktKey => traktClientId.isNotEmpty;
-  bool get hasTmdbKey => tmdbApiKey.isNotEmpty;
+  bool get hasTmdbKey => true;
   bool get hasAnyDebridKey => debridTokens.values.any((t) => t.isNotEmpty);
   int get configuredDebridCount =>
       debridTokens.values.where((t) => t.isNotEmpty).length;

@@ -198,7 +198,7 @@ class _SplashScreenState extends State<SplashScreen>
                               child: Transform.scale(
                                 scale: _iconScale.value,
                                 child: Image.asset(
-                                  'assets/icon/clubtivi-icon.png',
+                                  'assets/icon/yestream.png',
                                   width: 160,
                                   height: 160,
                                 ),
@@ -215,7 +215,7 @@ class _SplashScreenState extends State<SplashScreen>
                           opacity: _titleOpacity.value,
                           child: _isTV
                               ? const Text(
-                                  'clubTivi',
+                                  'YesXtream',
                                   style: TextStyle(
                                     fontSize: 42,
                                     fontWeight: FontWeight.w700,
@@ -228,7 +228,7 @@ class _SplashScreenState extends State<SplashScreen>
                             highlightColor: _accent.withValues(alpha: 0.9),
                             period: const Duration(milliseconds: 2000),
                             child: const Text(
-                              'clubTivi',
+                              'YesXtream',
                               style: TextStyle(
                                 fontSize: 42,
                                 fontWeight: FontWeight.w700,

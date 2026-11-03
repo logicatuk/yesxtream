@@ -1,5 +1,8 @@
 import 'package:dio/dio.dart';
 
+/// Direct TMDB API key (internal only - never exposed to user)
+const String tmdbApiKey = '23829a23ce35d4698331b31d4c662bd9';
+
 /// Client for The Movie Database (TMDB) API v3
 /// Docs: https://developer.themoviedb.org/docs
 class TmdbClient {
@@ -9,8 +12,15 @@ class TmdbClient {
   static const _baseUrl = 'https://api.themoviedb.org/3';
   static const _imageBase = 'https://image.tmdb.org/t/p';
 
+  static final TmdbClient defaultClient = TmdbClient(apiKey: tmdbApiKey);
+
+  // In-memory response cache for fast repeats
+  static final Map<String, TmdbShowDetail> _detailCache = {};
+  static final Map<String, List<TmdbSearchResult>> _searchCache = {};
+  static final Map<String, TmdbSeasonDetail> _seasonCache = {};
+
   TmdbClient({
-    required this.apiKey,
+    this.apiKey = tmdbApiKey,
     Dio? dio,
   }) : _dio = dio ?? Dio() {
     // Detect if user provided a v4 Bearer token (long JWT) vs v3 API key (short hex)
@@ -50,16 +60,19 @@ class TmdbClient {
   /// Get TV show details including images and external IDs
   Future<TmdbShowDetail> getTvShow(int tmdbId) async {
     final response = await _dio.get('/tv/$tmdbId',
-        queryParameters: {'append_to_response': 'external_ids'});
+        queryParameters: {'append_to_response': 'external_ids,credits,videos'});
     return TmdbShowDetail.fromJson(response.data as Map<String, dynamic>);
   }
 
   /// Get movie details including images and external IDs
   Future<TmdbShowDetail> getMovie(int tmdbId) async {
     final response = await _dio.get('/movie/$tmdbId',
-        queryParameters: {'append_to_response': 'external_ids'});
+        queryParameters: {'append_to_response': 'external_ids,credits,videos'});
     return TmdbShowDetail.fromJson(response.data as Map<String, dynamic>);
   }
+
+  /// Alias for getMovie
+  Future<TmdbShowDetail> getMovieDetails(int tmdbId) => getMovie(tmdbId);
 
   /// Get TV season details with episode list
   Future<TmdbSeasonDetail> getTvSeason(int tmdbId, int seasonNumber) async {
@@ -90,6 +103,9 @@ class TmdbClient {
         .map((e) => TmdbSearchResult.fromJson(e as Map<String, dynamic>))
         .toList();
   }
+
+  /// Alias for searchMovie
+  Future<List<TmdbSearchResult>> searchMovies(String query) => searchMovie(query);
 
   /// Get trending TV shows (day or week)
   Future<List<TmdbSearchResult>> getTrendingTv({String window = 'day', int page = 1}) async {
@@ -150,6 +166,70 @@ class TmdbClient {
     if (results.isEmpty) return null;
     return TmdbShowDetail.fromJson(results.first as Map<String, dynamic>);
   }
+
+  /// Search and get movie details with local cache
+  Future<TmdbShowDetail?> searchAndGetMovie(String title, {int? year}) async {
+    final cacheKey = 'm_${title.toLowerCase().trim()}_$year';
+    if (_detailCache.containsKey(cacheKey)) return _detailCache[cacheKey];
+
+    try {
+      final results = await searchMovie(title);
+      if (results.isEmpty) return null;
+      TmdbSearchResult best = results.first;
+      if (year != null) {
+        for (final r in results) {
+          if (r.year == year) {
+            best = r;
+            break;
+          }
+        }
+      }
+      final detail = await getMovie(best.id);
+      _detailCache[cacheKey] = detail;
+      return detail;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Search and get TV show details with local cache
+  Future<TmdbShowDetail?> searchAndGetTv(String title, {int? year}) async {
+    final cacheKey = 't_${title.toLowerCase().trim()}_$year';
+    if (_detailCache.containsKey(cacheKey)) return _detailCache[cacheKey];
+
+    try {
+      final results = await searchTv(title);
+      if (results.isEmpty) return null;
+      TmdbSearchResult best = results.first;
+      if (year != null) {
+        for (final r in results) {
+          if (r.year == year) {
+            best = r;
+            break;
+          }
+        }
+      }
+      final detail = await getTvShow(best.id);
+      _detailCache[cacheKey] = detail;
+      return detail;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Get TV season with local cache
+  Future<TmdbSeasonDetail?> getCachedTvSeason(int tmdbId, int seasonNumber) async {
+    final cacheKey = 's_${tmdbId}_$seasonNumber';
+    if (_seasonCache.containsKey(cacheKey)) return _seasonCache[cacheKey];
+
+    try {
+      final detail = await getTvSeason(tmdbId, seasonNumber);
+      _seasonCache[cacheKey] = detail;
+      return detail;
+    } catch (_) {
+      return null;
+    }
+  }
 }
 
 /// TMDB show/movie detail with image paths
@@ -166,6 +246,11 @@ class TmdbShowDetail {
   final int? numberOfSeasons;
   final int? numberOfEpisodes;
   final int? year;
+  final int? runtime;
+  final String? releaseDate;
+  final String? director;
+  final List<String> cast;
+  final String? trailerKey;
 
   const TmdbShowDetail({
     required this.id,
@@ -180,16 +265,53 @@ class TmdbShowDetail {
     this.numberOfSeasons,
     this.numberOfEpisodes,
     this.year,
+    this.runtime,
+    this.releaseDate,
+    this.director,
+    this.cast = const [],
+    this.trailerKey,
   });
 
   String get posterUrl => TmdbClient.posterUrl(posterPath);
   String get backdropUrl => TmdbClient.backdropUrl(backdropPath);
 
   factory TmdbShowDetail.fromJson(Map<String, dynamic> json) {
-    final releaseDate = json['release_date'] as String? ?? json['first_air_date'] as String? ?? '';
-    // IMDB ID: movies have it at top level, TV shows have it in external_ids
+    final relDate = json['release_date'] as String? ?? json['first_air_date'] as String? ?? '';
     final externalIds = json['external_ids'] as Map<String, dynamic>?;
     final imdbId = json['imdb_id'] as String? ?? externalIds?['imdb_id'] as String?;
+
+    // Credits
+    final credits = json['credits'] as Map<String, dynamic>?;
+    final crewList = credits?['crew'] as List?;
+    String? director;
+    if (crewList != null) {
+      for (final c in crewList) {
+        if (c is Map && c['job'] == 'Director') {
+          director = c['name'] as String?;
+          break;
+        }
+      }
+    }
+    final castList = (credits?['cast'] as List?)
+            ?.take(10)
+            .map((c) => (c is Map ? c['name'] as String? : null) ?? '')
+            .where((n) => n.isNotEmpty)
+            .toList() ??
+        [];
+
+    // Videos
+    final videos = json['videos'] as Map<String, dynamic>?;
+    final videoList = videos?['results'] as List?;
+    String? trailerKey;
+    if (videoList != null) {
+      for (final v in videoList) {
+        if (v is Map && v['type'] == 'Trailer' && v['site'] == 'YouTube') {
+          trailerKey = v['key'] as String?;
+          break;
+        }
+      }
+    }
+
     return TmdbShowDetail(
       id: json['id'] as int,
       title: json['title'] as String? ?? json['name'] as String? ?? '',
@@ -205,20 +327,29 @@ class TmdbShowDetail {
           [],
       numberOfSeasons: json['number_of_seasons'] as int?,
       numberOfEpisodes: json['number_of_episodes'] as int?,
-      year: releaseDate.length >= 4 ? int.tryParse(releaseDate.substring(0, 4)) : null,
+      year: relDate.length >= 4 ? int.tryParse(relDate.substring(0, 4)) : null,
+      runtime: json['runtime'] as int?,
+      releaseDate: relDate.isNotEmpty ? relDate : null,
+      director: director,
+      cast: castList,
+      trailerKey: trailerKey,
     );
   }
 }
 
 /// TMDB season detail with episodes
 class TmdbSeasonDetail {
+  final int? id;
   final int seasonNumber;
+  final String? name;
   final String? posterPath;
   final String? overview;
   final List<TmdbEpisode> episodes;
 
   const TmdbSeasonDetail({
+    this.id,
     required this.seasonNumber,
+    this.name,
     this.posterPath,
     this.overview,
     this.episodes = const [],
@@ -226,7 +357,9 @@ class TmdbSeasonDetail {
 
   factory TmdbSeasonDetail.fromJson(Map<String, dynamic> json) {
     return TmdbSeasonDetail(
+      id: json['id'] as int?,
       seasonNumber: json['season_number'] as int,
+      name: json['name'] as String?,
       posterPath: json['poster_path'] as String?,
       overview: json['overview'] as String?,
       episodes: (json['episodes'] as List?)

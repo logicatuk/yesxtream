@@ -10,6 +10,23 @@ import '../../data/services/logo_resolver_service.dart';
 import '../../core/feature_gate.dart';
 import 'package:dio/dio.dart';
 
+/// Parse Xtream credentials from an M3U URL if present (e.g. get.php?username=...&password=...)
+({String baseUrl, String username, String password})? parseXtreamFromM3uUrl(String url) {
+  try {
+    final uri = Uri.parse(url.trim());
+    final username = uri.queryParameters['username'];
+    final password = uri.queryParameters['password'];
+    if (username != null && username.isNotEmpty && password != null && password.isNotEmpty) {
+      final scheme = uri.scheme.isNotEmpty ? uri.scheme : 'http';
+      final host = uri.host;
+      final port = uri.hasPort ? ':${uri.port}' : '';
+      final baseUrl = '$scheme://$host$port';
+      return (baseUrl: baseUrl, username: username, password: password);
+    }
+  } catch (_) {}
+  return null;
+}
+
 /// Manages IPTV providers: adding, refreshing, channel loading.
 class ProviderManager {
   final db.AppDatabase _db;
@@ -32,13 +49,30 @@ class ProviderManager {
     required String url,
   }) async {
     await _checkProviderLimit();
+    // Auto-detect Xtream link disguised as M3U
+    final xtreamCreds = parseXtreamFromM3uUrl(url);
+    if (xtreamCreds != null) {
+      return addXtreamProvider(
+        id: id,
+        name: name,
+        url: xtreamCreds.baseUrl,
+        username: xtreamCreds.username,
+        password: xtreamCreds.password,
+      );
+    }
+
     await _db.upsertProvider(db.ProvidersCompanion.insert(
       id: id,
       name: name,
       type: 'm3u',
       url: Value(url),
     ));
-    await refreshProvider(id);
+    try {
+      await refreshProvider(id);
+    } catch (e) {
+      await _db.deleteProvider(id);
+      rethrow;
+    }
   }
 
   /// Add an Xtream Codes provider.
@@ -58,7 +92,12 @@ class ProviderManager {
       username: Value(username),
       password: Value(password),
     ));
-    await refreshProvider(id);
+    try {
+      await refreshProvider(id);
+    } catch (e) {
+      await _db.deleteProvider(id);
+      rethrow;
+    }
   }
 
   /// Refresh a provider's channels from its source.
@@ -96,7 +135,47 @@ class ProviderManager {
   }
 
   Future<List<Channel>> _refreshM3u(db.Provider provider) async {
-    final dio = Dio();
+    final xtreamCreds = parseXtreamFromM3uUrl(provider.url ?? '');
+    if (xtreamCreds != null) {
+      final client = XtreamClient(
+        baseUrl: xtreamCreds.baseUrl,
+        username: xtreamCreds.username,
+        password: xtreamCreds.password,
+      );
+      try {
+        final liveCats = await client.getLiveCategories();
+        final liveCatMap = {for (final c in liveCats) c.id: c.name};
+        final vodCats = await client.getVodCategories();
+        final vodCatMap = {for (final c in vodCats) c.id: c.name};
+        final seriesCats = await client.getSeriesCategories();
+        final seriesCatMap = {for (final c in seriesCats) c.id: c.name};
+
+        final lives = await client.getLiveStreams(providerId: provider.id, categoryMap: liveCatMap);
+        List<Channel> vods = [];
+        try {
+          vods = await client.getVodStreams(providerId: provider.id, categoryMap: vodCatMap);
+        } catch (_) {}
+        List<Channel> series = [];
+        try {
+          series = await client.getSeriesStreams(providerId: provider.id, categoryMap: seriesCatMap);
+        } catch (_) {}
+        return [...lives, ...vods, ...series];
+      } finally {
+        client.dispose();
+      }
+    }
+
+    final dio = Dio(
+      BaseOptions(
+        connectTimeout: const Duration(seconds: 20),
+        receiveTimeout: const Duration(seconds: 60),
+        headers: {
+          'User-Agent': 'IPTVSmartersPro/1.0.0 (Linux; Android 12)',
+          'Accept': '*/*',
+        },
+        validateStatus: (status) => status != null && status < 900,
+      ),
+    );
     try {
       final response = await dio.get<String>(provider.url!);
       final result = _m3uParser.parse(response.data!, providerId: provider.id);
@@ -113,7 +192,54 @@ class ProviderManager {
       password: provider.password!,
     );
     try {
-      return await client.getLiveStreams(providerId: provider.id);
+      // 1. Fetch category mappings
+      Map<String, String> liveCatMap = {};
+      try {
+        final liveCats = await client.getLiveCategories();
+        liveCatMap = {for (final c in liveCats) c.id: c.name};
+      } catch (e) {
+        debugPrint('[Xtream] Could not fetch live categories: $e');
+      }
+
+      Map<String, String> vodCatMap = {};
+      try {
+        final vodCats = await client.getVodCategories();
+        vodCatMap = {for (final c in vodCats) c.id: c.name};
+      } catch (e) {
+        debugPrint('[Xtream] Could not fetch VOD categories: $e');
+      }
+
+      Map<String, String> seriesCatMap = {};
+      try {
+        final seriesCats = await client.getSeriesCategories();
+        seriesCatMap = {for (final c in seriesCats) c.id: c.name};
+      } catch (e) {
+        debugPrint('[Xtream] Could not fetch series categories: $e');
+      }
+
+      // 2. Fetch streams with resolved categories
+      final lives = await client.getLiveStreams(
+        providerId: provider.id,
+        categoryMap: liveCatMap,
+      );
+
+      List<Channel> vods = [];
+      try {
+        vods = await client.getVodStreams(
+          providerId: provider.id,
+          categoryMap: vodCatMap,
+        );
+      } catch (_) {}
+
+      List<Channel> series = [];
+      try {
+        series = await client.getSeriesStreams(
+          providerId: provider.id,
+          categoryMap: seriesCatMap,
+        );
+      } catch (_) {}
+
+      return [...lives, ...vods, ...series];
     } finally {
       client.dispose();
     }
@@ -121,6 +247,10 @@ class ProviderManager {
 
   Future<void> deleteProvider(String id) async {
     await _db.deleteProvider(id);
+    final prefs = await SharedPreferences.getInstance();
+    if (prefs.getString('active_playlist_id') == id) {
+      await prefs.remove('active_playlist_id');
+    }
   }
 
   /// Resolve missing logos in background after provider refresh.

@@ -9,12 +9,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import 'package:clubtivi/app/app.dart';
+import 'package:yesxtream/app/app.dart';
 
 void main() {
   testWidgets('App renders channels screen', (WidgetTester tester) async {
     await tester.pumpWidget(
-      const ProviderScope(child: ClubTiviApp()),
+      const ProviderScope(child: YesXtreamApp()),
     );
     // The channels screen now starts with a loading indicator while
     // the database is queried; verify the app at least renders.

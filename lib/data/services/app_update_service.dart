@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'dart:io';
 
 import 'package:dio/dio.dart';
@@ -6,7 +5,6 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 
-const _repo = 'clubanderson/clubTivi';
 const _currentVersion = '0.4.0';
 
 class ReleaseInfo {
@@ -33,15 +31,21 @@ class AppUpdateService {
   static final Dio _dio = Dio();
   static const _channel = MethodChannel('io.github.clubanderson.clubtivi/installer');
 
+  /// Optional custom backend update endpoint (e.g. https://api.yourdomain.com/v1/app-version).
+  static String? customUpdateUrl;
+
   static String get currentVersion => _currentVersion;
 
-  /// Check GitHub for the latest release.
+  /// Check backend for the latest release.
   static Future<ReleaseInfo?> checkForUpdate() async {
+    if (customUpdateUrl == null) {
+      // Backend update check disabled until backend endpoint is configured
+      return null;
+    }
     try {
       final response = await _dio.get(
-        'https://api.github.com/repos/$_repo/releases/latest',
+        customUpdateUrl!,
         options: Options(
-          headers: {'Accept': 'application/vnd.github.v3+json'},
           receiveTimeout: const Duration(seconds: 10),
         ),
       );
