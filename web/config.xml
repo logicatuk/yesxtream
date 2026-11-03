@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<widget xmlns="http://www.w3.org/ns/widgets" 
+        xmlns:tizen="http://tizen.org/ns/widgets" 
+        id="http://yesxtream.tv/YesXtream" 
+        version="0.4.0" 
+        viewmodes="fullscreen">
+    <tizen:application id="yesxtream0.YesXtream" 
+                       exec="index.html" 
+                       screen-orientation="landscape" 
+                       required_version="3.0"/>
+    <name>YesXtream</name>
+    <description>YesXtream - Premium Smart TV IPTV Player</description>
+    <icon src="favicon.png"/>
+    
+    <!-- Samsung Tizen Privileges -->
+    <tizen:privilege name="http://tizen.org/privilege/internet"/>
+    <tizen:privilege name="http://tizen.org/privilege/tv.inputdevice"/>
+    <tizen:privilege name="http://tizen.org/privilege/tv.window"/>
+    <tizen:privilege name="http://tizen.org/privilege/tv.audio"/>
+    <tizen:privilege name="http://developer.samsung.com/privilege/network.public"/>
+    <tizen:privilege name="http://developer.samsung.com/privilege/drmplay"/>
+    
+    <!-- Samsung Smart TV Profile -->
+    <tizen:profile name="tv"/>
+    
+    <tizen:setting screen-orientation="landscape" 
+                   context-menu="enable" 
+                   background-support="disable" 
+                   encryption="disable" 
+                   install-location="auto"/>
+</widget>

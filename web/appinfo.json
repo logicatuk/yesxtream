@@ -1,0 +1,18 @@
+{
+  "id": "com.yesxtream.tv",
+  "version": "0.4.0",
+  "vendor": "YesXtream",
+  "type": "web",
+  "main": "index.html",
+  "title": "YesXtream",
+  "icon": "favicon.png",
+  "largeIcon": "favicon.png",
+  "resolution": "1920x1080",
+  "handlesRelaunch": true,
+  "requiredPermissions": [
+    "internet"
+  ],
+  "accessibility": {
+    "supportsAudioGuidance": true
+  }
+}

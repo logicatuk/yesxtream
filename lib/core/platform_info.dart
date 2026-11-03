@@ -17,42 +17,43 @@ class PlatformInfo {
   /// Force TV mode (useful for testing on desktop with keyboard).
   static void setTvOverride(bool value) => _isTvOverride = value;
 
-  /// True when running on Android TV (or overridden for testing).
+  /// True when running on a TV (Android TV, Fire TV, Samsung Tizen, LG webOS).
   static bool get isTV {
     if (_isTvOverride != null) return _isTvOverride!;
-    // On Android, detect TV by checking if it's a large landscape device
-    // without a touchscreen. The `android.software.leanback` feature
-    // presence is the canonical signal, but from Flutter/Dart we rely
-    // on heuristics: non-web Android + the absence of pointer-based input.
-    if (kIsWeb) return false;
-    return Platform.isAndroid && _detectedAsTV;
+    return _detectedAsTV;
   }
 
-  static bool get isMobile =>
-      !kIsWeb && (Platform.isAndroid || Platform.isIOS) && !isTV;
+  static bool get isMobile {
+    if (kIsWeb) return false;
+    return (Platform.isAndroid || Platform.isIOS) && !isTV;
+  }
 
-  static bool get isDesktop =>
-      !kIsWeb &&
-      (Platform.isMacOS || Platform.isLinux || Platform.isWindows);
+  static bool get isDesktop {
+    if (kIsWeb) return false;
+    return Platform.isMacOS || Platform.isLinux || Platform.isWindows;
+  }
 
   /// Cached TV detection result (set after first MediaQuery access).
   static bool _detectedAsTV = false;
 
   /// Call this once from a widget that has access to [MediaQuery].
-  /// Detects TV by screen size + shortest side heuristic.
+  /// Detects TV by screen size, shortest side, and directional navigation mode.
   static void detectFromContext(BuildContext context) {
     if (_isTvOverride != null) return;
-    if (!Platform.isAndroid) return;
 
     final data = MediaQuery.of(context);
     final size = data.size;
     final shortest = size.shortestSide;
-    // Android TV: landscape, large screen (shortest side > 500dp typically),
-    // and no system touch-based padding (or device pixel ratio suggests TV).
-    // Also check if no touch pointer devices are present.
-    final hasNoTouch = data.navigationMode == NavigationMode.directional;
-    final isLargeScreen = shortest > 500 && size.width > size.height;
+    final hasDirectionalNav = data.navigationMode == NavigationMode.directional;
+    final isTvScreen = shortest >= 540 && size.width > size.height;
 
-    _detectedAsTV = hasNoTouch || (isLargeScreen && data.devicePixelRatio < 2.0);
+    if (kIsWeb) {
+      _detectedAsTV = hasDirectionalNav || (isTvScreen && data.devicePixelRatio <= 2.0);
+      return;
+    }
+
+    if (Platform.isAndroid) {
+      _detectedAsTV = hasDirectionalNav || (isTvScreen && data.devicePixelRatio < 2.0);
+    }
   }
 }
