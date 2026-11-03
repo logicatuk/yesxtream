@@ -55,19 +55,41 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     _selectedGroup = widget.initialGroup;
   }
 
+  String _getGroupLabel(SettingsGroup group, AppSettings settings) {
+    switch (group) {
+      case SettingsGroup.general:
+        return settings.tr('general_settings');
+      case SettingsGroup.playback:
+        return settings.tr('player_settings');
+      case SettingsGroup.audioSubtitles:
+        return '${settings.tr('audio_track')} / ${settings.tr('subtitle_track')}';
+      case SettingsGroup.liveTvGuide:
+        return settings.tr('nav_live');
+      case SettingsGroup.parentalControls:
+        return settings.tr('parental_controls');
+      case SettingsGroup.deviceLicense:
+        return 'Device / License';
+      case SettingsGroup.privacy:
+        return 'Privacy';
+      case SettingsGroup.helpAbout:
+        return settings.tr('about');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final screenWidth = MediaQuery.of(context).size.width;
     final isCompact = screenWidth < 650;
+    final settings = ref.watch(appSettingsProvider);
 
     return Scaffold(
       backgroundColor: const Color(0xFF0A0A0F),
       appBar: AppBar(
         backgroundColor: const Color(0xFF0D0D14),
         elevation: 0,
-        title: const Text(
-          'Settings',
-          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20),
+        title: Text(
+          settings.tr('settings'),
+          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 20),
         ),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_rounded),
@@ -80,11 +102,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           },
         ),
       ),
-      body: isCompact ? _buildCompactLayout() : _buildTwoPanelLayout(),
+      body: isCompact ? _buildCompactLayout(settings) : _buildTwoPanelLayout(settings),
     );
   }
 
-  Widget _buildTwoPanelLayout() {
+  Widget _buildTwoPanelLayout(AppSettings settings) {
     return Row(
       children: [
         // ── Left Navigation Menu ──
@@ -113,7 +135,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   size: 20,
                 ),
                 title: Text(
-                  group.label,
+                  _getGroupLabel(group, settings),
                   style: TextStyle(
                     color: isSelected ? Colors.white : Colors.white70,
                     fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
@@ -137,12 +159,13 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     );
   }
 
-  Widget _buildCompactLayout() {
+  Widget _buildCompactLayout(AppSettings settings) {
     return ListView(
       children: SettingsGroup.values.map((group) {
+        final label = _getGroupLabel(group, settings);
         return ListTile(
           leading: Icon(group.icon, color: const Color(0xFF6C5CE7)),
-          title: Text(group.label, style: const TextStyle(color: Colors.white)),
+          title: Text(label, style: const TextStyle(color: Colors.white)),
           trailing: const Icon(Icons.chevron_right_rounded, color: Colors.white38),
           onTap: () {
             Navigator.of(context).push(
@@ -151,7 +174,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   backgroundColor: const Color(0xFF0A0A0F),
                   appBar: AppBar(
                     backgroundColor: const Color(0xFF0D0D14),
-                    title: Text(group.label),
+                    title: Text(label),
                   ),
                   body: _buildGroupContent(group),
                 ),
@@ -1413,47 +1436,56 @@ class _AutoRefreshTileState extends State<_AutoRefreshTile> {
   }
 }
 
-class _BufferSizeTile extends StatefulWidget {
+class _BufferSizeTile extends ConsumerWidget {
   @override
-  State<_BufferSizeTile> createState() => _BufferSizeTileState();
-}
+  Widget build(BuildContext context, WidgetRef ref) {
+    final settings = ref.watch(appSettingsProvider);
+    final mode = settings.bufferMode;
 
-class _BufferSizeTileState extends State<_BufferSizeTile> {
-  int _bufferSeconds = 15;
+    String subtitleText;
+    switch (mode) {
+      case 'low_latency':
+        subtitleText = settings.tr('buffer_low_latency_desc');
+        break;
+      case 'ultra':
+        subtitleText = settings.tr('buffer_ultra_desc');
+        break;
+      default:
+        subtitleText = settings.tr('buffer_standard_desc');
+    }
 
-  @override
-  void initState() {
-    super.initState();
-    _load();
-  }
-
-  Future<void> _load() async {
-    final prefs = await SharedPreferences.getInstance();
-    setState(() {
-      _bufferSeconds = prefs.getInt('player_buffer_seconds') ?? 15;
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
     return ListTile(
-      leading: const Icon(Icons.memory_rounded, color: Colors.white70),
-      title: const Text('Stream buffer size', style: TextStyle(color: Colors.white)),
-      trailing: DropdownButton<int>(
-        value: _bufferSeconds,
+      leading: const Icon(Icons.speed_rounded, color: Colors.white70),
+      title: Text(settings.tr('buffer_mode'), style: const TextStyle(color: Colors.white)),
+      subtitle: Text(
+        subtitleText,
+        style: const TextStyle(color: Colors.white38, fontSize: 12),
+      ),
+      trailing: DropdownButton<String>(
+        value: mode,
         dropdownColor: const Color(0xFF1E1C2E),
-        style: const TextStyle(color: Colors.white),
+        style: const TextStyle(color: Colors.white, fontSize: 13),
         underline: const SizedBox.shrink(),
-        items: const [
-          DropdownMenuItem(value: 5, child: Text('5s (Low latency)')),
-          DropdownMenuItem(value: 15, child: Text('15s (Balanced)')),
-          DropdownMenuItem(value: 30, child: Text('30s (Smooth)')),
+        items: [
+          DropdownMenuItem(
+            value: 'low_latency',
+            child: Text(settings.tr('buffer_low_latency')),
+          ),
+          DropdownMenuItem(
+            value: 'standard',
+            child: Text(settings.tr('buffer_standard')),
+          ),
+          DropdownMenuItem(
+            value: 'ultra',
+            child: Text(settings.tr('buffer_ultra')),
+          ),
         ],
         onChanged: (val) async {
           if (val != null) {
+            await ref.read(appSettingsProvider.notifier).update((s) => s.copyWith(bufferMode: val));
             final prefs = await SharedPreferences.getInstance();
-            await prefs.setInt('player_buffer_seconds', val);
-            setState(() => _bufferSeconds = val);
+            final legacySec = val == 'low_latency' ? 5 : (val == 'ultra' ? 45 : 15);
+            await prefs.setInt('player_buffer_seconds', legacySec);
           }
         },
       ),

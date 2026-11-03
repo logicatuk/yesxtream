@@ -91,6 +91,10 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
   // Last channel for back/forth toggle (not a full history stack)
   int _previousIndex = -1;
 
+  // TV Remote numerical channel jumping state
+  String _numberBuffer = '';
+  Timer? _numberTimer;
+
   // Sidebar state
   bool _sidebarExpanded = true;
   Set<String> _expandedSections = {'favorites'};
@@ -565,6 +569,7 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
     _searchDebounce?.cancel();
     _overlayTimer?.cancel();
     _nowPlayingTimer?.cancel();
+    _numberTimer?.cancel();
     _volumeOverlayTimer?.cancel();
     _topBarTimer?.cancel();
     _failoverTimer?.cancel();
@@ -1360,11 +1365,34 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
       return KeyEventResult.handled;
     }
 
+    // Remote numerical channel jumping (e.g. typing 1 0 5)
+    final digit = _getDigitFromKey(event.logicalKey);
+    if (digit != null) {
+      _appendChannelNumber(digit);
+      return KeyEventResult.handled;
+    }
+
     if (event.logicalKey == LogicalKeyboardKey.enter ||
         event.logicalKey == LogicalKeyboardKey.select) {
+      if (_numberBuffer.isNotEmpty) {
+        _executeNumberJump();
+        return KeyEventResult.handled;
+      }
       if (_previewChannel != null) {
         _goFullscreen(_previewChannel!);
       }
+      return KeyEventResult.handled;
+    }
+
+    if (event.logicalKey == LogicalKeyboardKey.escape ||
+        event.logicalKey == LogicalKeyboardKey.backspace ||
+        event.logicalKey == LogicalKeyboardKey.goBack) {
+      if (_numberBuffer.isNotEmpty) {
+        setState(() => _numberBuffer = '');
+        _numberTimer?.cancel();
+        return KeyEventResult.handled;
+      }
+      _goBackChannel();
       return KeyEventResult.handled;
     }
 
@@ -1378,13 +1406,61 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
       return KeyEventResult.handled;
     }
 
-    // Backspace → go back in channel history
-    if (event.logicalKey == LogicalKeyboardKey.backspace) {
-      _goBackChannel();
-      return KeyEventResult.handled;
+    return KeyEventResult.ignored;
+  }
+
+  String? _getDigitFromKey(LogicalKeyboardKey key) {
+    if (key == LogicalKeyboardKey.digit0 || key == LogicalKeyboardKey.numpad0) return '0';
+    if (key == LogicalKeyboardKey.digit1 || key == LogicalKeyboardKey.numpad1) return '1';
+    if (key == LogicalKeyboardKey.digit2 || key == LogicalKeyboardKey.numpad2) return '2';
+    if (key == LogicalKeyboardKey.digit3 || key == LogicalKeyboardKey.numpad3) return '3';
+    if (key == LogicalKeyboardKey.digit4 || key == LogicalKeyboardKey.numpad4) return '4';
+    if (key == LogicalKeyboardKey.digit5 || key == LogicalKeyboardKey.numpad5) return '5';
+    if (key == LogicalKeyboardKey.digit6 || key == LogicalKeyboardKey.numpad6) return '6';
+    if (key == LogicalKeyboardKey.digit7 || key == LogicalKeyboardKey.numpad7) return '7';
+    if (key == LogicalKeyboardKey.digit8 || key == LogicalKeyboardKey.numpad8) return '8';
+    if (key == LogicalKeyboardKey.digit9 || key == LogicalKeyboardKey.numpad9) return '9';
+    return null;
+  }
+
+  void _appendChannelNumber(String digit) {
+    if (_numberBuffer.length < 5) {
+      setState(() => _numberBuffer += digit);
+    }
+    _numberTimer?.cancel();
+    _numberTimer = Timer(const Duration(milliseconds: 1500), _executeNumberJump);
+  }
+
+  void _executeNumberJump() {
+    _numberTimer?.cancel();
+    final target = int.tryParse(_numberBuffer);
+    final buffer = _numberBuffer;
+    setState(() => _numberBuffer = '');
+    if (target == null || _filteredChannels.isEmpty) return;
+
+    // 1. Try matching channel number / tvgId in filtered channels
+    int targetIndex = _filteredChannels.indexWhere((c) {
+      final numStr = c.channelNumber?.toString() ?? c.tvgId?.toString() ?? '';
+      return numStr == buffer;
+    });
+
+    // 2. If not matched, try 1-based index in the filtered channels
+    if (targetIndex < 0 && target >= 1 && target <= _filteredChannels.length) {
+      targetIndex = target - 1;
     }
 
-    return KeyEventResult.ignored;
+    if (targetIndex >= 0 && targetIndex < _filteredChannels.length) {
+      _selectChannel(targetIndex);
+      _scrollToIndex(targetIndex);
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Channel $buffer not found'),
+          duration: const Duration(seconds: 2),
+          backgroundColor: const Color(0xFFE84118),
+        ),
+      );
+    }
   }
 
   void _scrollToIndex(int index) {
@@ -1477,49 +1553,91 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
           },
           child: Scaffold(
             backgroundColor: const Color(0xFF1A1A2E),
-            body: SafeArea(
-              child: Row(
-                children: [
-                  // Column 1: Categories (30%)
-                  _sidebarExpanded
-                      ? Expanded(flex: 3, child: _buildSidebar())
-                      : SizedBox(width: 44, child: _buildSidebar()),
+            body: Stack(
+              children: [
+                SafeArea(
+                  child: Row(
+                    children: [
+                      // Column 1: Categories (30%)
+                      _sidebarExpanded
+                          ? Expanded(flex: 3, child: _buildSidebar())
+                          : SizedBox(width: 44, child: _buildSidebar()),
 
-                  // Column 2: Channels List (30%)
-                  Expanded(
-                    flex: _sidebarExpanded ? 3 : 5,
-                    child: Stack(
-                      children: [
-                        _buildChannelList(),
-                        if (_showFailoverBanner && _failoverSuggestion != null)
-                          Positioned(
-                            top: 0, left: 0, right: 0,
-                            child: _buildFailoverBanner(),
-                          ),
-                        if (_multiSelectMode)
-                          Positioned(
-                            left: 8, right: 8, bottom: 8,
-                            child: _buildMultiSelectBar(),
-                          ),
-                      ],
-                    ),
-                  ),
-
-                  // Column 3: Live Preview Panel (40%)
-                  Expanded(
-                    flex: _sidebarExpanded ? 4 : 5,
-                    child: Container(
-                      decoration: const BoxDecoration(
-                        color: Color(0xFF10101C),
-                        border: Border(
-                          left: BorderSide(color: Color(0xFF1E1E2E), width: 1),
+                      // Column 2: Channels List (30%)
+                      Expanded(
+                        flex: _sidebarExpanded ? 3 : 5,
+                        child: Stack(
+                          children: [
+                            _buildChannelList(),
+                            if (_showFailoverBanner && _failoverSuggestion != null)
+                              Positioned(
+                                top: 0, left: 0, right: 0,
+                                child: _buildFailoverBanner(),
+                              ),
+                            if (_multiSelectMode)
+                              Positioned(
+                                left: 8, right: 8, bottom: 8,
+                                child: _buildMultiSelectBar(),
+                              ),
+                          ],
                         ),
                       ),
-                      child: _buildThreeColumnPreviewPanel(),
+
+                      // Column 3: Live Preview Panel (40%)
+                      Expanded(
+                        flex: _sidebarExpanded ? 4 : 5,
+                        child: Container(
+                          decoration: const BoxDecoration(
+                            color: Color(0xFF10101C),
+                            border: Border(
+                              left: BorderSide(color: Color(0xFF1E1E2E), width: 1),
+                            ),
+                          ),
+                          child: _buildThreeColumnPreviewPanel(),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+
+                // TV Remote numerical channel jumping overlay
+                if (_numberBuffer.isNotEmpty)
+                  Positioned(
+                    top: 24,
+                    right: 24,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 12),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF10101A).withValues(alpha: 0.95),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: const Color(0xFFA78BFA), width: 2.5),
+                        boxShadow: const [
+                          BoxShadow(
+                            color: Color(0xBB8B5CF6),
+                            blurRadius: 22,
+                            spreadRadius: 3,
+                          ),
+                        ],
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.dialpad_rounded, color: Color(0xFFA78BFA), size: 26),
+                          const SizedBox(width: 10),
+                          Text(
+                            'CH $_numberBuffer',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 26,
+                              fontWeight: FontWeight.w900,
+                              letterSpacing: 2.0,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
-                ],
-              ),
+              ],
             ),
           ),
         ),

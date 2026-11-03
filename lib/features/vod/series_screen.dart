@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../data/datasources/local/database.dart' as db;
 import '../../data/datasources/remote/tmdb_client.dart';
+import '../../data/services/app_settings.dart';
 import '../../data/services/playback_history_service.dart';
 import '../playlists/playlist_providers.dart';
 import '../providers/provider_manager.dart';
@@ -38,6 +39,7 @@ class _SeriesScreenState extends ConsumerState<SeriesScreen> {
     final activePlaylist = ref.watch(activePlaylistProvider);
     final dbInstance = ref.watch(databaseProvider);
     final history = ref.watch(watchHistoryProvider);
+    final settings = ref.watch(appSettingsProvider);
 
     return Scaffold(
       backgroundColor: const Color(0xFF0A0A0F),
@@ -147,12 +149,12 @@ class _SeriesScreenState extends ConsumerState<SeriesScreen> {
                                       borderRadius: BorderRadius.circular(6),
                                       border: Border.all(color: const Color(0xFF2A2840)),
                                     ),
-                                    child: const Row(
+                                    child: Row(
                                       mainAxisAlignment: MainAxisAlignment.center,
                                       children: [
-                                        Icon(Icons.arrow_back_rounded, size: 14, color: Colors.white70),
-                                        SizedBox(width: 4),
-                                        Text('Back', style: TextStyle(color: Colors.white70, fontSize: 12)),
+                                        const Icon(Icons.arrow_back_rounded, size: 14, color: Colors.white70),
+                                        const SizedBox(width: 4),
+                                        Text(settings.tr('back'), style: const TextStyle(color: Colors.white70, fontSize: 12)),
                                       ],
                                     ),
                                   ),
@@ -170,12 +172,12 @@ class _SeriesScreenState extends ConsumerState<SeriesScreen> {
                                       borderRadius: BorderRadius.circular(6),
                                       border: Border.all(color: const Color(0xFF2A2840)),
                                     ),
-                                    child: const Row(
+                                    child: Row(
                                       mainAxisAlignment: MainAxisAlignment.center,
                                       children: [
-                                        Icon(Icons.search_rounded, size: 14, color: Colors.white70),
-                                        SizedBox(width: 4),
-                                        Text('Search', style: TextStyle(color: Colors.white70, fontSize: 12)),
+                                        const Icon(Icons.search_rounded, size: 14, color: Colors.white70),
+                                        const SizedBox(width: 4),
+                                        Text(settings.tr('nav_search'), style: const TextStyle(color: Colors.white70, fontSize: 12)),
                                       ],
                                     ),
                                   ),
@@ -197,7 +199,7 @@ class _SeriesScreenState extends ConsumerState<SeriesScreen> {
                           onChanged: (val) => setState(() => _categorySearchQuery = val),
                           style: const TextStyle(color: Colors.white, fontSize: 12),
                           decoration: InputDecoration(
-                            hintText: 'Search categories…',
+                            hintText: settings.tr('search_categories'),
                             hintStyle: const TextStyle(color: Colors.white30, fontSize: 12),
                             prefixIcon: const Icon(Icons.search, size: 16, color: Colors.white38),
                             suffixIcon: _categorySearchQuery.isNotEmpty
@@ -233,9 +235,9 @@ class _SeriesScreenState extends ConsumerState<SeriesScreen> {
                         padding: EdgeInsets.zero,
                         children: [
                           if (recentCount > 0)
-                            _buildCategoryRow('Recently Viewed', 'Recently Viewed', recentCount),
-                          _buildCategoryRow('All', 'All', allCount),
-                          _buildCategoryRow('Favorites', 'Favorites', favCount),
+                            _buildCategoryRow('Recently Viewed', settings.tr('continue_watching'), recentCount),
+                          _buildCategoryRow('All', settings.tr('all_categories'), allCount),
+                          _buildCategoryRow('Favorites', settings.tr('favorites'), favCount),
                           ...visibleGroups.map((group) {
                             final count = categoryCounts[group] ?? 0;
                             return _buildCategoryRow(group, group, count);
@@ -328,6 +330,7 @@ class _SeriesScreenState extends ConsumerState<SeriesScreen> {
   }
 
   Widget _buildTopToolbar(int resultCount) {
+    final settings = ref.watch(appSettingsProvider);
     return Container(
       height: 52,
       padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -352,10 +355,10 @@ class _SeriesScreenState extends ConsumerState<SeriesScreen> {
                 dropdownColor: const Color(0xFF1B1A2C),
                 icon: const Icon(Icons.arrow_drop_down, color: Colors.white70),
                 style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600),
-                items: const [
-                  DropdownMenuItem(value: SeriesSortOption.recent, child: Text('Sort by Added')),
-                  DropdownMenuItem(value: SeriesSortOption.alphabetical, child: Text('Sort by A-Z')),
-                  DropdownMenuItem(value: SeriesSortOption.year, child: Text('Sort by Year')),
+                items: [
+                  DropdownMenuItem(value: SeriesSortOption.recent, child: Text(settings.tr('sort_recent'))),
+                  DropdownMenuItem(value: SeriesSortOption.alphabetical, child: Text(settings.tr('sort_alphabetical'))),
+                  DropdownMenuItem(value: SeriesSortOption.year, child: Text(settings.tr('sort_year'))),
                 ],
                 onChanged: (val) {
                   if (val != null) setState(() => _sortOption = val);
@@ -373,7 +376,7 @@ class _SeriesScreenState extends ConsumerState<SeriesScreen> {
               onChanged: (val) => setState(() => _searchQuery = val),
               style: const TextStyle(color: Colors.white, fontSize: 12),
               decoration: InputDecoration(
-                hintText: 'Search in $_selectedCategory…',
+                hintText: '${settings.tr('search_in')} $_selectedCategory…',
                 hintStyle: const TextStyle(color: Colors.white30, fontSize: 12),
                 prefixIcon: const Icon(Icons.search, size: 16, color: Colors.white38),
                 suffixIcon: _searchQuery.isNotEmpty

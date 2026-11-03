@@ -55,17 +55,23 @@ class _TvShellState extends State<TvShell> {
                   padding: const EdgeInsets.symmetric(horizontal: 12),
                   child: _sidebarFocused
                       ? const Text(
-                          'clubTivi',
+                          'YesXtream',
                           style: TextStyle(
                             fontSize: 20,
                             fontWeight: FontWeight.bold,
-                            color: Color(0xFF6C5CE7),
+                            color: Color(0xFF8B5CF6),
+                            letterSpacing: 0.5,
                           ),
                         )
-                      : const Icon(
-                          Icons.live_tv_rounded,
-                          color: Color(0xFF6C5CE7),
-                          size: 28,
+                      : Image.asset(
+                          'assets/icon/yestream.png',
+                          width: 28,
+                          height: 28,
+                          errorBuilder: (_, __, ___) => const Icon(
+                            Icons.play_circle_fill_rounded,
+                            color: Color(0xFF8B5CF6),
+                            size: 28,
+                          ),
                         ),
                 ),
                 const SizedBox(height: 32),
@@ -166,15 +172,24 @@ class _TvNavButtonState extends State<_TvNavButton> {
             padding: const EdgeInsets.symmetric(horizontal: 12),
             decoration: BoxDecoration(
               color: isHighlighted
-                  ? const Color(0xFF6C5CE7).withValues(alpha: 0.2)
+                  ? const Color(0xFF8B5CF6).withValues(alpha: 0.25)
                   : Colors.transparent,
               borderRadius: BorderRadius.circular(12),
               border: Border.all(
                 color: _focused
-                    ? const Color(0xFF6C5CE7)
+                    ? const Color(0xFFA78BFA)
                     : Colors.transparent,
-                width: 2,
+                width: 2.5,
               ),
+              boxShadow: _focused
+                  ? [
+                      const BoxShadow(
+                        color: Color(0x998B5CF6),
+                        blurRadius: 14,
+                        spreadRadius: 2,
+                      ),
+                    ]
+                  : null,
             ),
             child: Row(
               children: [
@@ -268,9 +283,18 @@ class _TvFocusCardState extends State<TvFocusCard> {
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(12),
           border: Border.all(
-            color: _focused ? const Color(0xFF6C5CE7) : Colors.transparent,
-            width: 2,
+            color: _focused ? const Color(0xFFA78BFA) : Colors.transparent,
+            width: _focused ? 3 : 1.5,
           ),
+          boxShadow: _focused
+              ? [
+                  const BoxShadow(
+                    color: Color(0xCC8B5CF6),
+                    blurRadius: 18,
+                    spreadRadius: 3,
+                  ),
+                ]
+              : null,
           color: const Color(0xFF1A1A2E),
         ),
         child: widget.child,

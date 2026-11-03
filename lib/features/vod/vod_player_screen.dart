@@ -4,12 +4,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:media_kit/media_kit.dart';
-import 'package:media_kit/src/player/native/player/real.dart' as native_player;
 import 'package:media_kit_video/media_kit_video.dart';
 
 import '../../data/services/app_settings.dart';
+import '../../data/services/pip_service.dart';
 import '../../data/services/playback_history_service.dart';
 import '../player/player_service.dart';
+import '../player/track_selection_hud.dart';
 
 class VodPlayerScreen extends ConsumerStatefulWidget {
   final String title;
@@ -129,8 +130,8 @@ class _VodPlayerScreenState extends ConsumerState<VodPlayerScreen> {
     }
     if (_aspectRatioIndex < 0) _aspectRatioIndex = 0;
 
-    final np = _player.platform;
-    if (np is native_player.NativePlayer) {
+    final dynamic np = _player.platform;
+    if (np != null) {
       await np.setProperty('user-agent', 'IPTVSmartersPro/1.0.0 (Linux; Android 12)');
       await np.setProperty('http-header-fields', 'User-Agent: IPTVSmartersPro/1.0.0 (Linux; Android 12)');
       await np.setProperty('audio-channels', 'stereo');
@@ -382,6 +383,20 @@ class _VodPlayerScreenState extends ConsumerState<VodPlayerScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final isInPip = ref.watch(pipServiceProvider).isInPip;
+
+    if (isInPip) {
+      return Scaffold(
+        backgroundColor: Colors.black,
+        body: Center(
+          child: AspectRatio(
+            aspectRatio: _getEffectiveAspectRatio(),
+            child: Video(controller: _videoController),
+          ),
+        ),
+      );
+    }
+
     final titleLine = widget.streamType == 'series' && _currentSeriesName != null
         ? '$_currentSeriesName • S${_currentSeasonNumber ?? 1} E${_currentEpisodeNumber ?? 1}${_currentEpisodeTitle != null ? ' - $_currentEpisodeTitle' : ''}'
         : _currentTitle;
@@ -591,6 +606,13 @@ class _VodPlayerScreenState extends ConsumerState<VodPlayerScreen> {
               style: const TextStyle(color: Colors.white70, fontSize: 13),
             ),
           ),
+          const SizedBox(width: 8),
+          // Picture-in-Picture button
+          IconButton(
+            icon: const Icon(Icons.picture_in_picture_alt_rounded, color: Colors.white70, size: 22),
+            tooltip: 'Picture in Picture',
+            onPressed: () => ref.read(pipServiceProvider).enterPip(),
+          ),
         ],
       ),
     );
@@ -681,6 +703,24 @@ class _VodPlayerScreenState extends ConsumerState<VodPlayerScreen> {
               ),
 
               const Spacer(),
+
+              // Quick HUD (Audio, Subtitles, Buffering, Presets)
+              IconButton(
+                icon: const Icon(Icons.tune_rounded, color: Color(0xFFA78BFA)),
+                tooltip: 'Audio & Subtitle HUD',
+                onPressed: () {
+                  TrackSelectionHud.show(
+                    context,
+                    player: _player,
+                    onPipRequested: () => ref.read(pipServiceProvider).enterPip(),
+                    currentAspectRatio: _aspectRatios[_aspectRatioIndex],
+                    onAspectRatioChanged: (r) {
+                      final idx = _aspectRatios.indexOf(r);
+                      if (idx >= 0) setState(() => _aspectRatioIndex = idx);
+                    },
+                  );
+                },
+              ),
 
               // Audio Drawer button (Screen 17)
               IconButton(

@@ -13,6 +13,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../data/datasources/local/database.dart' as db;
 import '../../data/services/app_settings.dart';
+import '../../data/services/pip_service.dart';
 import '../../data/services/stream_alternatives_service.dart';
 import '../../features/providers/provider_manager.dart' show databaseProvider;
 import '../casting/cast_service.dart';
@@ -20,6 +21,7 @@ import '../casting/cast_dialog.dart';
 import '../channels/channel_debug_dialog.dart';
 import 'player_service.dart';
 import 'stream_info_badges.dart';
+import 'track_selection_hud.dart';
 
 /// Full-screen video player with overlay controls and keyboard navigation.
 class PlayerScreen extends ConsumerStatefulWidget {
@@ -82,6 +84,10 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
 
   static const _aspectRatios = ['Auto', '16:9', '4:3', 'Fit', 'Fill'];
   int _aspectRatioIndex = 0;
+
+  // TV Remote numerical channel jumping state
+  String _numberBuffer = '';
+  Timer? _numberTimer;
 
   @override
   void initState() {
@@ -417,10 +423,34 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     final key = event.logicalKey;
     final isAndroid = Platform.isAndroid;
 
-    // Escape / Backspace / Back → close channel list first, then exit
+    // Numerical channel jumping via remote number keys (e.g. 1 0 5 -> jump to channel 105)
+    final digit = _getDigitFromKey(key);
+    if (digit != null) {
+      _appendChannelNumber(digit);
+      return KeyEventResult.handled;
+    }
+
+    // Select / Enter: if number is being entered, jump immediately! Otherwise toggle overlay
+    if (key == LogicalKeyboardKey.select ||
+        key == LogicalKeyboardKey.enter ||
+        key == LogicalKeyboardKey.gameButtonA) {
+      if (_numberBuffer.isNotEmpty) {
+        _executeNumberJump();
+        return KeyEventResult.handled;
+      }
+      _toggleOverlay();
+      return KeyEventResult.handled;
+    }
+
+    // Escape / Backspace / Back → close channel list or cancel number input first, then exit
     if (key == LogicalKeyboardKey.escape ||
         key == LogicalKeyboardKey.backspace ||
         key == LogicalKeyboardKey.goBack) {
+      if (_numberBuffer.isNotEmpty) {
+        setState(() => _numberBuffer = '');
+        _numberTimer?.cancel();
+        return KeyEventResult.handled;
+      }
       if (_showChannelList) {
         setState(() => _showChannelList = false);
         return KeyEventResult.handled;
@@ -431,14 +461,6 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
             ? GoRouter.of(context).pop()
             : GoRouter.of(context).go('/');
       });
-      return KeyEventResult.handled;
-    }
-
-    // Select / Enter → toggle overlay
-    if (key == LogicalKeyboardKey.select ||
-        key == LogicalKeyboardKey.enter ||
-        key == LogicalKeyboardKey.gameButtonA) {
-      _toggleOverlay();
       return KeyEventResult.handled;
     }
 
@@ -467,6 +489,59 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     }
 
     return KeyEventResult.ignored;
+  }
+
+  String? _getDigitFromKey(LogicalKeyboardKey key) {
+    if (key == LogicalKeyboardKey.digit0 || key == LogicalKeyboardKey.numpad0) return '0';
+    if (key == LogicalKeyboardKey.digit1 || key == LogicalKeyboardKey.numpad1) return '1';
+    if (key == LogicalKeyboardKey.digit2 || key == LogicalKeyboardKey.numpad2) return '2';
+    if (key == LogicalKeyboardKey.digit3 || key == LogicalKeyboardKey.numpad3) return '3';
+    if (key == LogicalKeyboardKey.digit4 || key == LogicalKeyboardKey.numpad4) return '4';
+    if (key == LogicalKeyboardKey.digit5 || key == LogicalKeyboardKey.numpad5) return '5';
+    if (key == LogicalKeyboardKey.digit6 || key == LogicalKeyboardKey.numpad6) return '6';
+    if (key == LogicalKeyboardKey.digit7 || key == LogicalKeyboardKey.numpad7) return '7';
+    if (key == LogicalKeyboardKey.digit8 || key == LogicalKeyboardKey.numpad8) return '8';
+    if (key == LogicalKeyboardKey.digit9 || key == LogicalKeyboardKey.numpad9) return '9';
+    return null;
+  }
+
+  void _appendChannelNumber(String digit) {
+    if (_numberBuffer.length < 5) {
+      setState(() => _numberBuffer += digit);
+    }
+    _numberTimer?.cancel();
+    _numberTimer = Timer(const Duration(milliseconds: 1500), _executeNumberJump);
+  }
+
+  void _executeNumberJump() {
+    _numberTimer?.cancel();
+    final target = int.tryParse(_numberBuffer);
+    final buffer = _numberBuffer;
+    setState(() => _numberBuffer = '');
+    if (target == null || widget.channels.isEmpty) return;
+
+    // 1. Try matching channel number or tvgId in list
+    int targetIndex = widget.channels.indexWhere((c) {
+      final numStr = c['channelNumber']?.toString() ?? c['tvgId']?.toString() ?? '';
+      return numStr == buffer;
+    });
+
+    // 2. If not matched, try 1-based index (e.g. typing 5 jumps to 5th channel)
+    if (targetIndex < 0 && target >= 1 && target <= widget.channels.length) {
+      targetIndex = target - 1;
+    }
+
+    if (targetIndex >= 0 && targetIndex < widget.channels.length) {
+      _switchChannel(targetIndex - _channelIndex);
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Channel $buffer not found'),
+          duration: const Duration(seconds: 2),
+          backgroundColor: const Color(0xFFE84118),
+        ),
+      );
+    }
   }
 
   void _switchChannel(int delta) {
@@ -511,6 +586,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   void dispose() {
     _overlayTimer?.cancel();
     _volumeTimer?.cancel();
+    _numberTimer?.cancel();
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     super.dispose();
   }
@@ -518,6 +594,17 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   @override
   Widget build(BuildContext context) {
     final playerService = ref.watch(playerServiceProvider);
+    final isInPip = ref.watch(pipServiceProvider).isInPip;
+
+    // In Picture-in-Picture mode, render clean video without any overlays
+    if (isInPip) {
+      return Scaffold(
+        backgroundColor: Colors.black,
+        body: Center(
+          child: _buildVideoSurface(playerService),
+        ),
+      );
+    }
 
     return Focus(
       autofocus: true,
@@ -578,7 +665,14 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                           ),
                           const Spacer(),
                           StreamInfoBadges(playerService: ref.read(playerServiceProvider)),
-                          const SizedBox(width: 12),
+                          const SizedBox(width: 8),
+                          // Quick PiP trigger
+                          IconButton(
+                            icon: const Icon(Icons.picture_in_picture_alt_rounded, color: Colors.white70, size: 22),
+                            tooltip: 'Picture in Picture',
+                            onPressed: () => ref.read(pipServiceProvider).enterPip(),
+                          ),
+                          const SizedBox(width: 8),
                           Text(
                             TimeOfDay.now().format(context),
                             style: const TextStyle(color: Colors.white60, fontSize: 13),
@@ -592,6 +686,44 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                 // Bottom floating card overlay
                 _buildLiveFullscreenCard(context),
               ],
+
+              // TV Remote Numerical Channel Jumping Overlay (Screen 10)
+              if (_numberBuffer.isNotEmpty)
+                Positioned(
+                  top: 36,
+                  right: 36,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF10101A).withValues(alpha: 0.95),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: const Color(0xFFA78BFA), width: 2.5),
+                      boxShadow: const [
+                        BoxShadow(
+                          color: Color(0xBB8B5CF6),
+                          blurRadius: 22,
+                          spreadRadius: 3,
+                        ),
+                      ],
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.dialpad_rounded, color: Color(0xFFA78BFA), size: 26),
+                        const SizedBox(width: 10),
+                        Text(
+                          'CH $_numberBuffer',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 26,
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: 2.0,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
 
               // Volume overlay
               if (_showVolumeOverlay)
@@ -1175,6 +1307,33 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                     ),
                     icon: const Icon(Icons.calendar_month_rounded, size: 18),
                     label: const Text('Guide', style: TextStyle(fontSize: 13)),
+                  ),
+                  const SizedBox(width: 8),
+
+                  // [Audio & Subtitles HUD]
+                  OutlinedButton.icon(
+                    onPressed: () {
+                      _autoHideOverlay();
+                      TrackSelectionHud.show(
+                        context,
+                        player: ref.read(playerServiceProvider).player,
+                        onPipRequested: () => ref.read(pipServiceProvider).enterPip(),
+                        currentAspectRatio: _aspectRatios[_aspectRatioIndex],
+                        onAspectRatioChanged: (r) {
+                          final idx = _aspectRatios.indexOf(r);
+                          if (idx >= 0) setState(() => _aspectRatioIndex = idx);
+                        },
+                      );
+                    },
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.white,
+                      side: const BorderSide(color: Color(0xFF8B5CF6)),
+                      backgroundColor: const Color(0xFF8B5CF6).withValues(alpha: 0.15),
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    ),
+                    icon: const Icon(Icons.tune_rounded, size: 18, color: Color(0xFFA78BFA)),
+                    label: const Text('Audio & Subs', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
                   ),
                   const SizedBox(width: 8),
 

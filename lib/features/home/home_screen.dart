@@ -55,9 +55,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     final statsAsync = ref.watch(activePlaylistStatsProvider);
     final settings = ref.watch(appSettingsProvider);
 
-    final isFrench = settings.language == 'French' ||
-        Localizations.maybeLocaleOf(context)?.languageCode == 'fr';
-
     return Scaffold(
       backgroundColor: const Color(0xFF070712),
       body: playlistsAsync.when(
@@ -69,7 +66,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         ),
         data: (playlists) {
           if (playlists.isEmpty) {
-            return _buildEmptyState(context, isFrench);
+            return _buildEmptyState(context, settings);
           }
 
           final accountInfo = accountInfoAsync.value;
@@ -125,7 +122,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                         activePlaylist,
                         accountInfo,
                         stats,
-                        isFrench,
+                        settings,
                       );
                     }
 
@@ -137,7 +134,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                       child: Column(
                         children: [
                           // ── Top Header (Logo center, Expiry right) ──
-                          _buildHeader(activePlaylist, accountInfo, isFrench),
+                          _buildHeader(activePlaylist, accountInfo, settings),
 
                           // ── Center Main Dashboard (Auto-scaled to fit any screen) ──
                           Expanded(
@@ -153,7 +150,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                                     activePlaylist,
                                     accountInfo,
                                     stats,
-                                    isFrench,
+                                    settings,
                                   ),
                                 ),
                               ),
@@ -178,21 +175,20 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   // ─────────────────────────────────────────────────────────────
   // ── Header (Logo centered, Expiry info on top right)
   // ─────────────────────────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────────
+  // ── Header (Logo centered, Expiry info on top right)
+  // ─────────────────────────────────────────────────────────────
   Widget _buildHeader(
     db.Provider? playlist,
     AccountInfo? accountInfo,
-    bool isFrench,
+    AppSettings settings,
   ) {
     String expiryText;
     if (accountInfo?.expDate != null) {
       final dateStr = DateFormat('dd/MM/yyyy').format(accountInfo!.expDate!);
-      expiryText = isFrench
-          ? 'La playlist actuelle expire $dateStr'
-          : 'Current playlist expires $dateStr';
+      expiryText = '${settings.tr('account_expires')} $dateStr';
     } else if (playlist != null) {
-      expiryText = isFrench
-          ? 'Playlist active: ${playlist.name}'
-          : 'Active playlist: ${playlist.name}';
+      expiryText = '${settings.tr('playlists_count')}: ${playlist.name}';
     } else {
       expiryText = '';
     }
@@ -232,7 +228,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     db.Provider? activePlaylist,
     AccountInfo? accountInfo,
     PlaylistStats stats,
-    bool isFrench,
+    AppSettings settings,
   ) {
     const totalHeight = 255.0;
 
@@ -240,12 +236,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       mainAxisAlignment: MainAxisAlignment.center,
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-        // ── 1. Big Hero Tile: "En direct" (Live TV) ──
+        // ── 1. Big Hero Tile: "Live TV" ──
         SizedBox(
           width: 250,
           height: totalHeight,
           child: _TvHeroTile(
-            title: isFrench ? 'En direct' : 'Live TV',
+            title: settings.tr('live_tv'),
             onTap: () => context.go('/live'),
           ),
         ),
@@ -264,7 +260,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   children: [
                     Expanded(
                       child: _TvGridTile(
-                        title: isFrench ? 'Films' : 'Movies',
+                        title: settings.tr('movies'),
                         icon: Icons.play_circle_outline_rounded,
                         onTap: () => context.go('/movies'),
                       ),
@@ -272,7 +268,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     const SizedBox(width: 14),
                     Expanded(
                       child: _TvGridTile(
-                        title: isFrench ? 'Séries' : 'Series',
+                        title: settings.tr('series'),
                         icon: Icons.movie_creation_outlined,
                         onTap: () => context.go('/series'),
                       ),
@@ -280,7 +276,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     const SizedBox(width: 14),
                     Expanded(
                       child: _TvGridTile(
-                        title: isFrench ? 'Catch-up' : 'Catch-up',
+                        title: settings.tr('catchup_tv'),
                         icon: Icons.replay_rounded,
                         badgeText: 'REPLAY',
                         onTap: () => context.go('/catchup'),
@@ -299,14 +295,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     Expanded(
                       flex: 1,
                       child: _TvGridTile(
-                        title: isFrench ? 'Compte' : 'Account',
+                        title: settings.tr('account_details'),
                         icon: Icons.people_alt_outlined,
                         onTap: () => _showAccountDialog(
                           context,
                           activePlaylist,
                           accountInfo,
                           stats,
-                          isFrench,
+                          settings,
                         ),
                       ),
                     ),
@@ -314,11 +310,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     Expanded(
                       flex: 1,
                       child: _TvGridTile(
-                        title: isFrench
-                            ? 'Changer la liste\nde lecture'
-                            : 'Change\nplaylist',
+                        title: settings.tr('switch_playlist'),
                         icon: Icons.switch_account_outlined,
-                        onTap: () => _showPlaylistSwitcher(context, isFrench),
+                        onTap: () => _showPlaylistSwitcher(context, settings),
                       ),
                     ),
                   ],
@@ -338,7 +332,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             children: [
               Expanded(
                 child: _TvActionButton(
-                  title: isFrench ? 'Paramètres' : 'Settings',
+                  title: settings.tr('settings'),
                   icon: Icons.settings_outlined,
                   onTap: () => context.go('/settings'),
                 ),
@@ -346,19 +340,19 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               const SizedBox(height: 12),
               Expanded(
                 child: _TvActionButton(
-                  title: isFrench ? 'Recharger' : 'Reload',
+                  title: settings.tr('refresh_playlist'),
                   icon: Icons.refresh_rounded,
                   isLoading: _isReloading,
-                  onTap: () => _handleReload(activePlaylist, isFrench),
+                  onTap: () => _handleReload(activePlaylist, settings),
                 ),
               ),
               const SizedBox(height: 12),
               Expanded(
                 child: _TvActionButton(
-                  title: isFrench ? 'QUITTER' : 'QUIT',
+                  title: settings.tr('exit_dialog_confirm'),
                   icon: Icons.logout_rounded,
                   isExit: true,
-                  onTap: () => _showExitDialog(context, isFrench),
+                  onTap: () => _showExitDialog(context, settings),
                 ),
               ),
             ],
@@ -376,19 +370,19 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     db.Provider? activePlaylist,
     AccountInfo? accountInfo,
     PlaylistStats stats,
-    bool isFrench,
+    AppSettings settings,
   ) {
     return ListView(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
       children: [
-        _buildHeader(activePlaylist, accountInfo, isFrench),
+        _buildHeader(activePlaylist, accountInfo, settings),
         const SizedBox(height: 20),
 
         // Hero Tile
         SizedBox(
           height: 180,
           child: _TvHeroTile(
-            title: isFrench ? 'En direct' : 'Live TV',
+            title: settings.tr('live_tv'),
             onTap: () => context.go('/live'),
           ),
         ),
@@ -402,7 +396,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               child: SizedBox(
                 height: 110,
                 child: _TvGridTile(
-                  title: isFrench ? 'Films' : 'Movies',
+                  title: settings.tr('movies'),
                   icon: Icons.play_circle_outline_rounded,
                   onTap: () => context.go('/movies'),
                 ),
@@ -413,7 +407,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               child: SizedBox(
                 height: 110,
                 child: _TvGridTile(
-                  title: isFrench ? 'Séries' : 'Series',
+                  title: settings.tr('series'),
                   icon: Icons.movie_creation_outlined,
                   onTap: () => context.go('/series'),
                 ),
@@ -431,7 +425,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               child: SizedBox(
                 height: 110,
                 child: _TvGridTile(
-                  title: isFrench ? 'Catch-up' : 'Catch-up',
+                  title: settings.tr('catchup_tv'),
                   icon: Icons.replay_rounded,
                   badgeText: 'REPLAY',
                   onTap: () => context.go('/catchup'),
@@ -443,14 +437,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               child: SizedBox(
                 height: 110,
                 child: _TvGridTile(
-                  title: isFrench ? 'Compte' : 'Account',
+                  title: settings.tr('account_details'),
                   icon: Icons.people_alt_outlined,
                   onTap: () => _showAccountDialog(
                     context,
                     activePlaylist,
                     accountInfo,
                     stats,
-                    isFrench,
+                    settings,
                   ),
                 ),
               ),
@@ -464,11 +458,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         SizedBox(
           height: 90,
           child: _TvGridTile(
-            title: isFrench
-                ? 'Changer la liste de lecture'
-                : 'Change playlist',
+            title: settings.tr('switch_playlist'),
             icon: Icons.switch_account_outlined,
-            onTap: () => _showPlaylistSwitcher(context, isFrench),
+            onTap: () => _showPlaylistSwitcher(context, settings),
           ),
         ),
 
@@ -476,23 +468,23 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
         // Action Buttons
         _TvActionButton(
-          title: isFrench ? 'Paramètres' : 'Settings',
+          title: settings.tr('settings'),
           icon: Icons.settings_outlined,
           onTap: () => context.go('/settings'),
         ),
         const SizedBox(height: 10),
         _TvActionButton(
-          title: isFrench ? 'Recharger' : 'Reload',
+          title: settings.tr('refresh_playlist'),
           icon: Icons.refresh_rounded,
           isLoading: _isReloading,
-          onTap: () => _handleReload(activePlaylist, isFrench),
+          onTap: () => _handleReload(activePlaylist, settings),
         ),
         const SizedBox(height: 10),
         _TvActionButton(
-          title: isFrench ? 'QUITTER' : 'QUIT',
+          title: settings.tr('exit_dialog_confirm'),
           icon: Icons.logout_rounded,
           isExit: true,
-          onTap: () => _showExitDialog(context, isFrench),
+          onTap: () => _showExitDialog(context, settings),
         ),
 
         const SizedBox(height: 24),
@@ -520,9 +512,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   }
 
   // ─────────────────────────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────────
   // ── Empty State
   // ─────────────────────────────────────────────────────────────
-  Widget _buildEmptyState(BuildContext context, bool isFrench) {
+  Widget _buildEmptyState(BuildContext context, AppSettings settings) {
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(32),
@@ -549,7 +542,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             ),
             const SizedBox(height: 24),
             Text(
-              isFrench ? 'Aucune playlist trouvée' : 'No Playlists Found',
+              settings.tr('no_channels_found'),
               style: const TextStyle(
                 fontSize: 24,
                 fontWeight: FontWeight.bold,
@@ -558,9 +551,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             ),
             const SizedBox(height: 10),
             Text(
-              isFrench
-                  ? 'Ajoutez votre connexion Xtream Codes ou lien M3U pour commencer.'
-                  : 'Add your Xtream Codes login or M3U playlist to begin watching.',
+              '${settings.tr('playlists_count')} • Xtream Codes / M3U',
               textAlign: TextAlign.center,
               style: const TextStyle(fontSize: 15, color: Colors.white60),
             ),
@@ -577,7 +568,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               ),
               icon: const Icon(Icons.add_rounded, size: 20),
               label: Text(
-                isFrench ? 'Ajouter une playlist' : 'Add Playlist',
+                settings.tr('switch_playlist'),
                 style: const TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.w700,
@@ -593,7 +584,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   // ─────────────────────────────────────────────────────────────
   // ── Reload Handler
   // ─────────────────────────────────────────────────────────────
-  Future<void> _handleReload(db.Provider? playlist, bool isFrench) async {
+  Future<void> _handleReload(db.Provider? playlist, AppSettings settings) async {
     if (playlist == null || _isReloading) return;
 
     setState(() => _isReloading = true);
@@ -614,9 +605,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                 const SizedBox(width: 10),
                 Expanded(
                   child: Text(
-                    isFrench
-                        ? 'Playlist rechargée avec succès ! ($count éléments)'
-                        : 'Playlist reloaded successfully! ($count items)',
+                    '${settings.tr('refresh_playlist')} ($count)',
                     style: const TextStyle(color: Colors.white),
                   ),
                 ),
@@ -656,13 +645,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     db.Provider? playlist,
     AccountInfo? info,
     PlaylistStats stats,
-    bool isFrench,
+    AppSettings settings,
   ) {
     if (playlist == null) return;
 
     final expiryFormatted = info?.expDate != null
         ? DateFormat('dd/MM/yyyy HH:mm').format(info!.expDate!)
-        : (isFrench ? 'Illimité / Inconnu' : 'Unlimited / Unknown');
+        : 'Unlimited';
 
     showDialog(
       context: context,
@@ -707,7 +696,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   const SizedBox(width: 12),
                   Expanded(
                     child: Text(
-                      isFrench ? 'Informations du compte' : 'Account Details',
+                      settings.tr('account_details'),
                       style: const TextStyle(
                         color: Colors.white,
                         fontSize: 18,
@@ -724,31 +713,31 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               const Divider(color: Color(0xFF22203A), height: 28),
 
               _buildInfoRow(
-                isFrench ? 'Nom du profil' : 'Profile Name',
+                'Profile',
                 playlist.name,
               ),
               _buildInfoRow(
-                isFrench ? 'Type' : 'Type',
+                'Type',
                 playlist.type.toUpperCase(),
               ),
               if (playlist.username != null && playlist.username!.isNotEmpty)
                 _buildInfoRow(
-                  isFrench ? 'Utilisateur' : 'Username',
+                  'Username',
                   playlist.username!,
                 ),
               _buildInfoRow(
-                isFrench ? 'Statut' : 'Status',
-                info?.status ?? 'Active',
+                settings.tr('account_status'),
+                info?.status ?? settings.tr('account_active'),
                 valueColor: const Color(0xFF00B894),
               ),
               _buildInfoRow(
-                isFrench ? 'Expiration' : 'Expiration',
+                settings.tr('account_expires'),
                 expiryFormatted,
                 valueColor: const Color(0xFFA29BFE),
               ),
               if (info?.maxConnections != null)
                 _buildInfoRow(
-                  isFrench ? 'Connexions max' : 'Max Connections',
+                  'Max Connections',
                   '${info!.maxConnections}',
                 ),
 
@@ -758,9 +747,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceAround,
                 children: [
-                  _buildStatPill('En direct', '${stats.liveCount}'),
-                  _buildStatPill('Films', '${stats.moviesCount}'),
-                  _buildStatPill('Séries', '${stats.seriesCount}'),
+                  _buildStatPill(settings.tr('live_tv'), '${stats.liveCount}'),
+                  _buildStatPill(settings.tr('movies'), '${stats.moviesCount}'),
+                  _buildStatPill(settings.tr('series'), '${stats.seriesCount}'),
                 ],
               ),
 
@@ -775,7 +764,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                       borderRadius: BorderRadius.circular(8),
                     ),
                   ),
-                  child: Text(isFrench ? 'Fermer' : 'Close'),
+                  child: const Text('OK'),
                 ),
               ),
             ],
@@ -836,7 +825,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   // ─────────────────────────────────────────────────────────────
   // ── Playlist Switcher Dialog ("Changer la liste de lecture")
   // ─────────────────────────────────────────────────────────────
-  void _showPlaylistSwitcher(BuildContext context, bool isFrench) {
+  void _showPlaylistSwitcher(BuildContext context, AppSettings settings) {
     showDialog(
       context: context,
       builder: (ctx) => Consumer(
@@ -876,9 +865,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                       const SizedBox(width: 10),
                       Expanded(
                         child: Text(
-                          isFrench
-                              ? 'Changer la liste de lecture'
-                              : 'Select Playlist',
+                          settings.tr('switch_playlist'),
                           style: const TextStyle(
                             color: Colors.white,
                             fontSize: 18,
@@ -1010,7 +997,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                           icon: const Icon(Icons.settings_suggest_rounded,
                               size: 16),
                           label: Text(
-                            isFrench ? 'Gérer' : 'Manage',
+                            settings.tr('playlists_count'),
                             style: const TextStyle(fontSize: 13),
                           ),
                           style: OutlinedButton.styleFrom(
@@ -1034,9 +1021,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                             });
                           },
                           icon: const Icon(Icons.add_rounded, size: 16),
-                          label: Text(
-                            isFrench ? 'Ajouter' : 'Add New',
-                            style: const TextStyle(fontSize: 13),
+                          label: const Text(
+                            '+ Playlist',
+                            style: TextStyle(fontSize: 13),
                           ),
                           style: FilledButton.styleFrom(
                             backgroundColor: const Color(0xFF6C5CE7),
@@ -1060,7 +1047,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   // ─────────────────────────────────────────────────────────────
   // ── Exit Dialog ("QUITTER")
   // ─────────────────────────────────────────────────────────────
-  void _showExitDialog(BuildContext context, bool isFrench) {
+  void _showExitDialog(BuildContext context, AppSettings settings) {
     showDialog(
       context: context,
       builder: (ctx) => Dialog(
@@ -1086,7 +1073,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               ),
               const SizedBox(height: 16),
               Text(
-                isFrench ? 'Quitter l\'application' : 'Exit Application',
+                settings.tr('exit_dialog_title'),
                 style: const TextStyle(
                   color: Colors.white,
                   fontSize: 18,
@@ -1095,9 +1082,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               ),
               const SizedBox(height: 10),
               Text(
-                isFrench
-                    ? 'Êtes-vous sûr de vouloir quitter ?'
-                    : 'Are you sure you want to exit the player?',
+                settings.tr('exit_dialog_message'),
                 textAlign: TextAlign.center,
                 style: const TextStyle(color: Colors.white60, fontSize: 14),
               ),
@@ -1114,7 +1099,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                           borderRadius: BorderRadius.circular(8),
                         ),
                       ),
-                      child: Text(isFrench ? 'Annuler' : 'Cancel'),
+                      child: Text(settings.tr('exit_dialog_cancel')),
                     ),
                   ),
                   const SizedBox(width: 12),
@@ -1134,7 +1119,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                           borderRadius: BorderRadius.circular(8),
                         ),
                       ),
-                      child: Text(isFrench ? 'QUITTER' : 'QUIT'),
+                      child: Text(settings.tr('exit_dialog_confirm')),
                     ),
                   ),
                 ],

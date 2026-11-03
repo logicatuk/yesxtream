@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
+import '../../data/services/app_settings.dart';
 import '../playlists/playlist_providers.dart';
 import '../providers/add_provider_dialog.dart';
 
@@ -25,6 +26,7 @@ class _YesShellState extends ConsumerState<YesShell> {
     final location = GoRouterState.of(context).uri.toString();
     final playlistsAsync = ref.watch(allPlaylistsProvider);
     final activePlaylist = ref.watch(activePlaylistProvider);
+    final settings = ref.watch(appSettingsProvider);
 
     // Fullscreen for Home launcher dashboard
     final isHome = location == '/' || location == '/home';
@@ -37,7 +39,7 @@ class _YesShellState extends ConsumerState<YesShell> {
       body: Column(
         children: [
           // ── Top Bar with Logo, 4 Tabs, and Right Clock Timer ──
-          _buildTopBar(context, location),
+          _buildTopBar(context, location, settings),
 
           // ── Full-Width Page Content (No left navigation rail) ──
           Expanded(child: widget.child),
@@ -49,6 +51,7 @@ class _YesShellState extends ConsumerState<YesShell> {
   Widget _buildTopBar(
     BuildContext context,
     String location,
+    AppSettings settings,
   ) {
     return Container(
       height: 58,
@@ -108,28 +111,28 @@ class _YesShellState extends ConsumerState<YesShell> {
               // ── 2. Navigation Tabs (Home | Live | Movies | Series) ──
               _buildTopTab(
                 context: context,
-                title: 'Home',
+                title: settings.tr('nav_home'),
                 route: '/home',
                 isSelected: location == '/' || location == '/home',
               ),
               _buildTabDivider(),
               _buildTopTab(
                 context: context,
-                title: 'Live',
+                title: settings.tr('nav_live'),
                 route: '/live',
                 isSelected: location.startsWith('/live'),
               ),
               _buildTabDivider(),
               _buildTopTab(
                 context: context,
-                title: 'Movies',
+                title: settings.tr('nav_movies'),
                 route: '/movies',
                 isSelected: location.startsWith('/movies'),
               ),
               _buildTabDivider(),
               _buildTopTab(
                 context: context,
-                title: 'Series',
+                title: settings.tr('nav_series'),
                 route: '/series',
                 isSelected: location.startsWith('/series'),
               ),

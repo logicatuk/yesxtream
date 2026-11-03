@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../../core/localization/app_translations.dart';
 
 class AppSettings {
   final bool autoPreview;
@@ -11,7 +12,7 @@ class AppSettings {
   final String clockFormat; // '12-hour', '24-hour'
   final String startupPage; // 'Home', 'Live TV'
   final String textSize; // 'Small', 'Normal', 'Large'
-  final String language; // 'English', 'Spanish', etc.
+  final String language; // 'English', 'Français', etc.
   final bool parentalControlsEnabled;
   final String parentalPin;
   final List<String> lockedCategories;
@@ -22,6 +23,7 @@ class AppSettings {
   final bool hardwareAcceleration; // Hardware GPU decoding vs software
   final bool autoRefreshOnStartup; // Automatically refresh channels & EPG on launch
   final String defaultAspectRatio; // 'Fit (Auto)', '16:9', '4:3', 'Fill / Stretch', 'Zoom'
+  final String bufferMode; // 'standard', 'low_latency', 'ultra'
 
   const AppSettings({
     this.autoPreview = true,
@@ -42,7 +44,14 @@ class AppSettings {
     this.hardwareAcceleration = true,
     this.autoRefreshOnStartup = true,
     this.defaultAspectRatio = 'Fit (Auto)',
+    this.bufferMode = 'standard',
   });
+
+  /// Localized string lookup for current settings language
+  String tr(String key) => AppTranslations.tr(key, language);
+
+  /// RTL layout detection (Arabic)
+  bool get isRtl => AppTranslations.isRtl(language);
 
   AppSettings copyWith({
     bool? autoPreview,
@@ -63,6 +72,7 @@ class AppSettings {
     bool? hardwareAcceleration,
     bool? autoRefreshOnStartup,
     String? defaultAspectRatio,
+    String? bufferMode,
   }) {
     return AppSettings(
       autoPreview: autoPreview ?? this.autoPreview,
@@ -83,6 +93,7 @@ class AppSettings {
       hardwareAcceleration: hardwareAcceleration ?? this.hardwareAcceleration,
       autoRefreshOnStartup: autoRefreshOnStartup ?? this.autoRefreshOnStartup,
       defaultAspectRatio: defaultAspectRatio ?? this.defaultAspectRatio,
+      bufferMode: bufferMode ?? this.bufferMode,
     );
   }
 
@@ -141,6 +152,7 @@ class AppSettingsNotifier extends StateNotifier<AppSettings> {
   static const _kHwAcc = 'setting_hardware_acc';
   static const _kAutoRefreshStartup = 'setting_auto_refresh_startup';
   static const _kAspectRatio = 'setting_aspect_ratio';
+  static const _kBufferMode = 'setting_buffer_mode';
 
   Future<void> _load() async {
     final prefs = await SharedPreferences.getInstance();
@@ -163,6 +175,7 @@ class AppSettingsNotifier extends StateNotifier<AppSettings> {
       hardwareAcceleration: prefs.getBool(_kHwAcc) ?? true,
       autoRefreshOnStartup: prefs.getBool(_kAutoRefreshStartup) ?? true,
       defaultAspectRatio: prefs.getString(_kAspectRatio) ?? 'Fit (Auto)',
+      bufferMode: prefs.getString(_kBufferMode) ?? 'standard',
     );
   }
 
@@ -188,6 +201,7 @@ class AppSettingsNotifier extends StateNotifier<AppSettings> {
     await prefs.setBool(_kHwAcc, updated.hardwareAcceleration);
     await prefs.setBool(_kAutoRefreshStartup, updated.autoRefreshOnStartup);
     await prefs.setString(_kAspectRatio, updated.defaultAspectRatio);
+    await prefs.setString(_kBufferMode, updated.bufferMode);
   }
 }
 

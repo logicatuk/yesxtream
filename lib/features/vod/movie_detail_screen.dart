@@ -7,6 +7,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../data/datasources/local/database.dart' as db;
 import '../../data/datasources/remote/tmdb_client.dart';
 import '../../data/datasources/remote/xtream_client.dart';
+import '../../data/services/app_settings.dart';
 import '../../data/services/playback_history_service.dart';
 import '../providers/provider_manager.dart';
 
@@ -110,7 +111,7 @@ class _MovieDetailScreenState extends ConsumerState<MovieDetailScreen> {
         }
       }
 
-      if (baseUrl != null && username != null && password != null && vodId != null && vodId.isNotEmpty) {
+      if (baseUrl != null && username != null && password != null && vodId.isNotEmpty) {
         final client = XtreamClient(
           baseUrl: baseUrl,
           username: username,
@@ -226,6 +227,13 @@ class _MovieDetailScreenState extends ConsumerState<MovieDetailScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (_loading) {
+      return const Scaffold(
+        backgroundColor: Color(0xFF0A0A0F),
+        body: Center(child: CircularProgressIndicator(color: Color(0xFF6C5CE7))),
+      );
+    }
+
     final history = ref.watch(watchHistoryProvider);
     final historyItem = history.where((h) => h.id == widget.movie.id).firstOrNull;
     final hasProgress = historyItem != null && historyItem.positionMs > 10000;
@@ -296,6 +304,7 @@ class _MovieDetailScreenState extends ConsumerState<MovieDetailScreen> {
 
     // Trailer Key
     final trailerKey = _xtreamInfo?['youtube_trailer'] as String? ?? _tmdbDetail?.trailerKey;
+    final settings = ref.watch(appSettingsProvider);
 
     return Scaffold(
       backgroundColor: const Color(0xFF0A0A0F),
@@ -482,9 +491,9 @@ class _MovieDetailScreenState extends ConsumerState<MovieDetailScreen> {
                               const SizedBox(height: 20),
 
                               // Overview / Synopsis
-                              const Text(
-                                'Overview',
-                                style: TextStyle(
+                              Text(
+                                settings.tr('plot'),
+                                style: const TextStyle(
                                   fontSize: 16,
                                   fontWeight: FontWeight.bold,
                                   color: Colors.white,
@@ -505,8 +514,8 @@ class _MovieDetailScreenState extends ConsumerState<MovieDetailScreen> {
                               if (director != null && director.isNotEmpty) ...[
                                 Row(
                                   children: [
-                                    const Text('Director: ',
-                                        style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white70, fontSize: 13)),
+                                    Text('${settings.tr('director')}: ',
+                                        style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white70, fontSize: 13)),
                                     Text(director, style: const TextStyle(color: Colors.white, fontSize: 13)),
                                   ],
                                 ),
@@ -515,9 +524,9 @@ class _MovieDetailScreenState extends ConsumerState<MovieDetailScreen> {
 
                               // Cast section
                               if (castList.isNotEmpty) ...[
-                                const Text(
-                                  'Cast',
-                                  style: TextStyle(
+                                Text(
+                                  settings.tr('cast'),
+                                  style: const TextStyle(
                                     fontSize: 15,
                                     fontWeight: FontWeight.bold,
                                     color: Colors.white,
@@ -586,14 +595,14 @@ class _MovieDetailScreenState extends ConsumerState<MovieDetailScreen> {
                                     ),
                                     icon: const Icon(Icons.play_arrow_rounded, size: 22),
                                     label: Text(
-                                      hasProgress ? 'Resume' : 'Play',
+                                      hasProgress ? settings.tr('resume_movie') : settings.tr('play_movie'),
                                       style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
                                     ),
                                   ),
 
                                   if (trailerKey != null && trailerKey.isNotEmpty)
                                     OutlinedButton.icon(
-                                      onPressed: () => _launchTrailer(trailerKey!),
+                                      onPressed: () => _launchTrailer(trailerKey),
                                       style: OutlinedButton.styleFrom(
                                         side: const BorderSide(color: Color(0xFFE74C3C)),
                                         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
@@ -602,9 +611,9 @@ class _MovieDetailScreenState extends ConsumerState<MovieDetailScreen> {
                                         ),
                                       ),
                                       icon: const Icon(Icons.play_circle_outline_rounded, color: Color(0xFFE74C3C), size: 20),
-                                      label: const Text(
-                                        'Trailer',
-                                        style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold),
+                                      label: Text(
+                                        settings.tr('trailer'),
+                                        style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold),
                                       ),
                                     ),
 

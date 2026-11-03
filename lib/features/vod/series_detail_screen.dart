@@ -7,6 +7,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../data/datasources/local/database.dart' as db;
 import '../../data/datasources/remote/tmdb_client.dart';
 import '../../data/datasources/remote/xtream_client.dart';
+import '../../data/services/app_settings.dart';
 import '../../data/services/playback_history_service.dart';
 import '../providers/provider_manager.dart';
 
@@ -118,7 +119,7 @@ class _SeriesDetailScreenState extends ConsumerState<SeriesDetailScreen> {
         }
       }
 
-      if (baseUrl != null && username != null && password != null && seriesId != null && seriesId.isNotEmpty) {
+      if (baseUrl != null && username != null && password != null && seriesId.isNotEmpty) {
         final client = XtreamClient(
           baseUrl: baseUrl,
           username: username,
@@ -342,6 +343,7 @@ class _SeriesDetailScreenState extends ConsumerState<SeriesDetailScreen> {
 
     final totalSeasons = _tmdbDetail?.numberOfSeasons ??
         (_xtreamFallbackEpisodes.isNotEmpty ? _xtreamFallbackEpisodes.keys.length : 1);
+    final settings = ref.watch(appSettingsProvider);
 
     return Scaffold(
       backgroundColor: const Color(0xFF0A0A0F),
@@ -506,8 +508,8 @@ class _SeriesDetailScreenState extends ConsumerState<SeriesDetailScreen> {
                               if (director != null && director.isNotEmpty) ...[
                                 Row(
                                   children: [
-                                    const Text('Director: ',
-                                        style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white70, fontSize: 12)),
+                                    Text('${settings.tr('director')}: ',
+                                        style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white70, fontSize: 12)),
                                     Text(director, style: const TextStyle(color: Colors.white, fontSize: 12)),
                                   ],
                                 ),
@@ -516,9 +518,9 @@ class _SeriesDetailScreenState extends ConsumerState<SeriesDetailScreen> {
 
                               // Cast list
                               if (castList.isNotEmpty) ...[
-                                const Text(
-                                  'Cast',
-                                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.white),
+                                Text(
+                                  settings.tr('cast'),
+                                  style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.white),
                                 ),
                                 const SizedBox(height: 6),
                                 Wrap(
@@ -555,17 +557,17 @@ class _SeriesDetailScreenState extends ConsumerState<SeriesDetailScreen> {
                                       backgroundColor: const Color(0xFF6C5CE7),
                                     ),
                                     icon: const Icon(Icons.play_arrow_rounded, size: 20),
-                                    label: const Text('Play'),
+                                    label: Text(settings.tr('play_episode')),
                                   ),
 
                                   if (trailerKey != null && trailerKey.isNotEmpty)
                                     OutlinedButton.icon(
-                                      onPressed: () => _launchTrailer(trailerKey!),
+                                      onPressed: () => _launchTrailer(trailerKey),
                                       style: OutlinedButton.styleFrom(
                                         side: const BorderSide(color: Color(0xFFE74C3C)),
                                       ),
                                       icon: const Icon(Icons.play_circle_outline_rounded, color: Color(0xFFE74C3C), size: 18),
-                                      label: const Text('Trailer', style: TextStyle(color: Colors.white, fontSize: 13)),
+                                      label: Text(settings.tr('trailer'), style: const TextStyle(color: Colors.white, fontSize: 13)),
                                     ),
 
                                   // Favorite button
@@ -581,7 +583,7 @@ class _SeriesDetailScreenState extends ConsumerState<SeriesDetailScreen> {
                                       ),
                                     ),
                                     child: IconButton(
-                                      tooltip: _isFavorite ? 'Remove from Favorites' : 'Add to Favorites',
+                                      tooltip: _isFavorite ? settings.tr('remove_favorites') : settings.tr('add_favorites'),
                                       icon: Icon(
                                         _isFavorite ? Icons.star_rounded : Icons.star_border_rounded,
                                         color: _isFavorite ? const Color(0xFFFFD32A) : Colors.white,
@@ -607,9 +609,9 @@ class _SeriesDetailScreenState extends ConsumerState<SeriesDetailScreen> {
                               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
                               child: Row(
                                 children: [
-                                  const Text(
-                                    'Season: ',
-                                    style: TextStyle(
+                                  Text(
+                                    '${settings.tr('season')}: ',
+                                    style: const TextStyle(
                                       fontSize: 16,
                                       fontWeight: FontWeight.bold,
                                       color: Colors.white,
@@ -632,7 +634,7 @@ class _SeriesDetailScreenState extends ConsumerState<SeriesDetailScreen> {
                                         items: List.generate(totalSeasons, (i) => i + 1).map((s) {
                                           return DropdownMenuItem<int>(
                                             value: s,
-                                            child: Text('Season $s'),
+                                            child: Text('${settings.tr('season')} $s'),
                                           );
                                         }).toList(),
                                         onChanged: (val) {
@@ -648,10 +650,10 @@ class _SeriesDetailScreenState extends ConsumerState<SeriesDetailScreen> {
                             // Episode List
                             Expanded(
                               child: _seasonDetail == null || _seasonDetail!.episodes.isEmpty
-                                  ? const Center(
+                                  ? Center(
                                       child: Text(
-                                        'No episodes found for this season',
-                                        style: TextStyle(color: Colors.white38),
+                                        settings.tr('no_episodes'),
+                                        style: const TextStyle(color: Colors.white38),
                                       ),
                                     )
                                   : ListView.separated(
