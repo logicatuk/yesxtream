@@ -30,6 +30,14 @@ class ActivePlaylistNotifier extends StateNotifier<String?> {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_kActivePlaylistId, providerId);
   }
+
+  Future<void> clearIfDeleted(String providerId) async {
+    if (state == providerId) {
+      state = null;
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_kActivePlaylistId);
+    }
+  }
 }
 
 final activePlaylistIdProvider =

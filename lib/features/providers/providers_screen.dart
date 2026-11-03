@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../data/datasources/local/database.dart' as db;
+import '../playlists/playlist_providers.dart';
 import 'add_provider_dialog.dart';
 import 'provider_manager.dart';
 
@@ -249,8 +250,28 @@ class _ProviderCard extends ConsumerWidget {
                   ),
                 );
                 if (confirmed == true) {
-                  final manager = ref.read(providerManagerProvider);
-                  await manager.deleteProvider(provider.id);
+                  try {
+                    final manager = ref.read(providerManagerProvider);
+                    await manager.deleteProvider(provider.id);
+                    await ref.read(activePlaylistIdProvider.notifier).clearIfDeleted(provider.id);
+                    ref.invalidate(allPlaylistsProvider);
+                    ref.invalidate(activePlaylistStatsProvider);
+                    ref.invalidate(activePlaylistAccountInfoProvider);
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Provider deleted')),
+                      );
+                    }
+                  } catch (e) {
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          backgroundColor: Colors.redAccent,
+                          content: Text('Failed to delete provider: $e'),
+                        ),
+                      );
+                    }
+                  }
                 }
               },
             ),

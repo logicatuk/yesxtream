@@ -77,10 +77,49 @@ class AppDatabase extends _$AppDatabase {
       into(providers).insertOnConflictUpdate(entry);
 
   Future<void> deleteProvider(String id) async {
-    await transaction(() async {
-      await (delete(channels)..where((t) => t.providerId.equals(id))).go();
-      await (delete(providers)..where((t) => t.id.equals(id))).go();
-    });
+    await customStatement('PRAGMA foreign_keys = OFF;');
+    try {
+      await transaction(() async {
+        // 1. Delete EPG mappings associated with this provider or any of its channels
+        await customStatement(
+          'DELETE FROM epg_mappings WHERE provider_id = ? OR channel_id IN (SELECT id FROM channels WHERE provider_id = ?);',
+          [id, id],
+        );
+
+        // 2. Delete favorite list references to this provider's channels
+        await customStatement(
+          'DELETE FROM favorite_list_channels WHERE channel_id IN (SELECT id FROM channels WHERE provider_id = ?);',
+          [id],
+        );
+
+        // 3. Delete failover group references to this provider's channels
+        await customStatement(
+          'DELETE FROM failover_group_channels WHERE channel_id IN (SELECT id FROM channels WHERE provider_id = ?);',
+          [id],
+        );
+
+        // 4. Delete reminders and scheduled recordings for this provider's channels
+        await customStatement(
+          'DELETE FROM epg_reminders WHERE channel_id IN (SELECT id FROM channels WHERE provider_id = ?);',
+          [id],
+        );
+        await customStatement(
+          'DELETE FROM scheduled_recordings WHERE channel_id IN (SELECT id FROM channels WHERE provider_id = ?);',
+          [id],
+        );
+
+        // 5. Delete all channels belonging to this provider
+        await customStatement(
+          'DELETE FROM channels WHERE provider_id = ?;',
+          [id],
+        );
+
+        // 6. Delete the provider itself
+        await (delete(providers)..where((t) => t.id.equals(id))).go();
+      });
+    } finally {
+      await customStatement('PRAGMA foreign_keys = ON;');
+    }
   }
 
   // --- Channel queries ---

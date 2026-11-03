@@ -363,13 +363,27 @@ class _ManagePlaylistDialogState extends ConsumerState<_ManagePlaylistDialog> {
     );
 
     if (confirmed == true) {
-      final manager = ref.read(providerManagerProvider);
-      await manager.deleteProvider(widget.playlist.id);
-      if (!mounted) return;
-      Navigator.of(context).pop();
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Playlist removed')),
-      );
+      try {
+        final manager = ref.read(providerManagerProvider);
+        await manager.deleteProvider(widget.playlist.id);
+        await ref.read(activePlaylistIdProvider.notifier).clearIfDeleted(widget.playlist.id);
+        ref.invalidate(allPlaylistsProvider);
+        ref.invalidate(activePlaylistStatsProvider);
+        ref.invalidate(activePlaylistAccountInfoProvider);
+        if (!mounted) return;
+        Navigator.of(context).pop();
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Playlist removed')),
+        );
+      } catch (e) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: Colors.redAccent,
+            content: Text('Failed to remove playlist: $e'),
+          ),
+        );
+      }
     }
   }
 
