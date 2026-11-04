@@ -69,6 +69,7 @@ class _PlaylistFormDialogState extends ConsumerState<_PlaylistFormDialog> {
   bool _isImporting = false;
   int _importStep = 0; // 0=idle, 1=conn, 2=cat, 3=catalog, 4=ready
   String? _importError;
+  String? _stepMessage;
 
   @override
   void initState() {
@@ -95,6 +96,7 @@ class _PlaylistFormDialogState extends ConsumerState<_PlaylistFormDialog> {
     setState(() {
       _testingConnection = true;
       _testResult = null;
+      _importError = null;
     });
 
     final rawUrl = _urlCtrl.text.trim();
@@ -127,6 +129,19 @@ class _PlaylistFormDialogState extends ConsumerState<_PlaylistFormDialog> {
           seriesCount = series.length;
         } catch (_) {}
 
+        if (liveCount == 0 && vodCount == 0 && seriesCount == 0) {
+          if (mounted) {
+            setState(() {
+              _testingConnection = false;
+              _testResult = const _TestResult(
+                success: false,
+                errorMessage: 'Authentication succeeded, but no streams or channels were found on this account.',
+              );
+            });
+          }
+          return;
+        }
+
         if (mounted) {
           setState(() {
             _testingConnection = false;
@@ -145,7 +160,7 @@ class _PlaylistFormDialogState extends ConsumerState<_PlaylistFormDialog> {
             _testingConnection = false;
             _testResult = _TestResult(
               success: false,
-              errorMessage: 'Could not connect: $e',
+              errorMessage: e.toString().replaceFirst('Exception: ', ''),
             );
           });
         }
@@ -153,7 +168,6 @@ class _PlaylistFormDialogState extends ConsumerState<_PlaylistFormDialog> {
         client.dispose();
       }
     } else {
-      // M3U test with IPTV headers and validateStatus
       final dio = Dio(
         BaseOptions(
           connectTimeout: const Duration(seconds: 15),
@@ -162,17 +176,26 @@ class _PlaylistFormDialogState extends ConsumerState<_PlaylistFormDialog> {
             'User-Agent': 'IPTVSmartersPro/1.0.0 (Linux; Android 12)',
             'Accept': '*/*',
           },
-          validateStatus: (status) => status != null && status < 900,
         ),
       );
       try {
-        final res = await dio.get<dynamic>(
+        final res = await dio.get<String>(
           url,
           options: Options(
-            responseType: ResponseType.stream,
-            headers: {'Range': 'bytes=0-1024'},
+            headers: {'Range': 'bytes=0-4096'},
           ),
         );
+        if (res.statusCode != null && (res.statusCode! < 200 || res.statusCode! >= 300)) {
+          throw Exception('Server returned HTTP ${res.statusCode}');
+        }
+        final text = res.data?.trim() ?? '';
+        if (text.startsWith('<!DOCTYPE') || text.startsWith('<html') || text.startsWith('<?xml') || text.startsWith('{')) {
+          throw Exception('The URL returned a web page or document instead of an M3U playlist.');
+        }
+        if (!text.contains('#EXTM3U') && !text.contains('#EXTINF:')) {
+          throw Exception('URL response is missing #EXTM3U or #EXTINF header. Not a valid M3U file.');
+        }
+
         if (mounted) {
           setState(() {
             _testingConnection = false;
@@ -188,7 +211,7 @@ class _PlaylistFormDialogState extends ConsumerState<_PlaylistFormDialog> {
             _testingConnection = false;
             _testResult = _TestResult(
               success: false,
-              errorMessage: 'Unable to reach M3U playlist URL ($e)',
+              errorMessage: e.toString().replaceFirst('Exception: ', ''),
             );
           });
         }
@@ -199,9 +222,12 @@ class _PlaylistFormDialogState extends ConsumerState<_PlaylistFormDialog> {
   }
 
   Future<void> _startImport() async {
+    if (!_formKey.currentState!.validate()) return;
+
     setState(() {
       _isImporting = true;
       _importStep = 1;
+      _stepMessage = 'Connecting & authenticating...';
       _importError = null;
     });
 
@@ -212,16 +238,6 @@ class _PlaylistFormDialogState extends ConsumerState<_PlaylistFormDialog> {
         'p_${name.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '_')}_${DateTime.now().millisecondsSinceEpoch}';
 
     try {
-      // Step 1: Connection checked
-      await Future<void>.delayed(const Duration(milliseconds: 300));
-      if (!mounted) return;
-      setState(() => _importStep = 2);
-
-      // Step 2: Categories loaded
-      await Future<void>.delayed(const Duration(milliseconds: 300));
-      if (!mounted) return;
-      setState(() => _importStep = 3);
-
       final manager = ref.read(providerManagerProvider);
       final xtreamFromM3u = parseXtreamFromM3uUrl(url);
 
@@ -232,23 +248,42 @@ class _PlaylistFormDialogState extends ConsumerState<_PlaylistFormDialog> {
           url: xtreamFromM3u?.baseUrl ?? url,
           username: xtreamFromM3u?.username ?? _userCtrl.text.trim(),
           password: xtreamFromM3u?.password ?? _passCtrl.text.trim(),
+          onProgress: (step, message) {
+            if (mounted) {
+              setState(() {
+                _importStep = step;
+                _stepMessage = message;
+              });
+            }
+          },
         );
       } else {
         await manager.addM3uProvider(
           id: providerId,
           name: name,
           url: url,
+          onProgress: (step, message) {
+            if (mounted) {
+              setState(() {
+                _importStep = step;
+                _stepMessage = message;
+              });
+            }
+          },
         );
       }
 
-      // Step 3: Catalog loaded & Step 4: Ready
+      // Step 4: Ready
       if (!mounted) return;
-      setState(() => _importStep = 4);
+      setState(() {
+        _importStep = 4;
+        _stepMessage = 'Playlist ready!';
+      });
 
       // Set as active playlist
       await ref.read(activePlaylistIdProvider.notifier).selectPlaylist(providerId);
 
-      await Future<void>.delayed(const Duration(milliseconds: 200));
+      await Future<void>.delayed(const Duration(milliseconds: 300));
       if (!mounted) return;
       Navigator.of(context).pop();
       context.go('/live');
@@ -256,7 +291,9 @@ class _PlaylistFormDialogState extends ConsumerState<_PlaylistFormDialog> {
       if (!mounted) return;
       setState(() {
         _isImporting = false;
-        _importError = 'Could not connect to this provider.\n$e\n\nYour details have not been discarded.';
+        _importStep = 0;
+        _stepMessage = null;
+        _importError = 'Connection failed:\n${e.toString().replaceFirst("Exception: ", "")}\n\nYour details have not been discarded.';
       });
     }
   }
@@ -583,34 +620,38 @@ class _PlaylistFormDialogState extends ConsumerState<_PlaylistFormDialog> {
               const SizedBox(height: 24),
 
               _buildStagedStep(
-                title: 'Connection checked',
-                isDone: _importStep >= 2,
+                title: 'Connection & credentials',
+                subtitle: _importStep == 1 ? _stepMessage : null,
+                isDone: _importStep > 1,
                 isLoading: _importStep == 1,
               ),
               const SizedBox(height: 14),
 
               _buildStagedStep(
                 title: 'Categories loaded',
-                isDone: _importStep >= 3,
+                subtitle: _importStep == 2 ? _stepMessage : null,
+                isDone: _importStep > 2,
                 isLoading: _importStep == 2,
               ),
               const SizedBox(height: 14),
 
               _buildStagedStep(
                 title: 'Loading catalog',
-                isDone: _importStep >= 4,
+                subtitle: _importStep == 3 ? _stepMessage : null,
+                isDone: _importStep > 3,
                 isLoading: _importStep == 3,
               ),
               const SizedBox(height: 14),
 
               _buildStagedStep(
                 title: 'Preparing guide',
+                subtitle: _importStep == 4 ? _stepMessage : null,
                 isDone: _importStep >= 4,
                 isLoading: false,
               ),
               const SizedBox(height: 24),
 
-              if (_importStep >= 3)
+              if (_importStep >= 4)
                 Center(
                   child: TextButton.icon(
                     onPressed: () {
@@ -623,6 +664,19 @@ class _PlaylistFormDialogState extends ConsumerState<_PlaylistFormDialog> {
                       style: TextStyle(color: Color(0xFF6C5CE7), fontWeight: FontWeight.bold),
                     ),
                   ),
+                )
+              else
+                Center(
+                  child: TextButton(
+                    onPressed: () {
+                      setState(() {
+                        _isImporting = false;
+                        _importStep = 0;
+                        _stepMessage = null;
+                      });
+                    },
+                    child: const Text('Cancel', style: TextStyle(color: Colors.white54)),
+                  ),
                 ),
             ],
           ),
@@ -633,30 +687,45 @@ class _PlaylistFormDialogState extends ConsumerState<_PlaylistFormDialog> {
 
   Widget _buildStagedStep({
     required String title,
+    String? subtitle,
     required bool isDone,
     required bool isLoading,
   }) {
-    return Row(
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        if (isDone)
-          const Icon(Icons.check_circle_rounded, color: Colors.greenAccent, size: 22)
-        else if (isLoading)
-          const SizedBox(
-            width: 22,
-            height: 22,
-            child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF6C5CE7)),
-          )
-        else
-          const Icon(Icons.radio_button_unchecked_rounded, color: Colors.white24, size: 22),
-        const SizedBox(width: 14),
-        Text(
-          title,
-          style: TextStyle(
-            fontSize: 15,
-            color: isDone ? Colors.white : (isLoading ? Colors.white70 : Colors.white38),
-            fontWeight: isDone || isLoading ? FontWeight.w600 : FontWeight.normal,
-          ),
+        Row(
+          children: [
+            if (isDone)
+              const Icon(Icons.check_circle_rounded, color: Colors.greenAccent, size: 22)
+            else if (isLoading)
+              const SizedBox(
+                width: 22,
+                height: 22,
+                child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF6C5CE7)),
+              )
+            else
+              const Icon(Icons.radio_button_unchecked_rounded, color: Colors.white24, size: 22),
+            const SizedBox(width: 14),
+            Text(
+              title,
+              style: TextStyle(
+                fontSize: 15,
+                color: isDone ? Colors.white : (isLoading ? Colors.white : Colors.white38),
+                fontWeight: isDone || isLoading ? FontWeight.w600 : FontWeight.normal,
+              ),
+            ),
+          ],
         ),
+        if (subtitle != null && isLoading) ...[
+          Padding(
+            padding: const EdgeInsets.only(left: 36, top: 4),
+            child: Text(
+              subtitle,
+              style: const TextStyle(fontSize: 12, color: Color(0xFFA78BFA)),
+            ),
+          ),
+        ],
       ],
     );
   }

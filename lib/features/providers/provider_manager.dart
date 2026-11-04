@@ -42,11 +42,12 @@ class ProviderManager {
     }
   }
 
-  /// Add an M3U provider.
-  Future<void> addM3uProvider({
+  /// Add an M3U provider. Verifies the playlist and parses channels before saving to DB.
+  Future<int> addM3uProvider({
     required String id,
     required String name,
     required String url,
+    void Function(int step, String message)? onProgress,
   }) async {
     await _checkProviderLimit();
     // Auto-detect Xtream link disguised as M3U
@@ -58,32 +59,85 @@ class ProviderManager {
         url: xtreamCreds.baseUrl,
         username: xtreamCreds.username,
         password: xtreamCreds.password,
+        onProgress: onProgress,
       );
     }
 
+    final tempProvider = db.Provider(
+      id: id,
+      name: name,
+      type: 'm3u',
+      url: url,
+      username: null,
+      password: null,
+      sortOrder: 0,
+      enabled: true,
+      lastRefresh: null,
+      createdAt: DateTime.now(),
+    );
+
+    // Verify & fetch channels FIRST before adding to DB
+    final channels = await _refreshM3u(tempProvider, onProgress: onProgress);
+    if (channels.isEmpty) {
+      throw Exception('No playable channels found in this M3U playlist.');
+    }
+
+    onProgress?.call(4, 'Saving playlist to database...');
     await _db.upsertProvider(db.ProvidersCompanion.insert(
       id: id,
       name: name,
       type: 'm3u',
       url: Value(url),
     ));
-    try {
-      await refreshProvider(id);
-    } catch (e) {
-      await _db.deleteProvider(id);
-      rethrow;
-    }
+
+    await _db.upsertChannels(channels.map((c) => db.ChannelsCompanion.insert(
+      id: c.id,
+      providerId: c.providerId,
+      name: c.name,
+      tvgId: Value(c.tvgId),
+      tvgName: Value(c.tvgName),
+      tvgLogo: Value(c.tvgLogo),
+      groupTitle: Value(c.groupTitle),
+      channelNumber: Value(c.channelNumber),
+      streamUrl: c.streamUrl,
+      streamType: Value(c.streamType.name),
+    )).toList());
+
+    _resolveChannelLogos(channels).catchError((_) {});
+    return channels.length;
   }
 
-  /// Add an Xtream Codes provider.
-  Future<void> addXtreamProvider({
+  /// Add an Xtream Codes provider. Verifies login credentials and streams before saving to DB.
+  Future<int> addXtreamProvider({
     required String id,
     required String name,
     required String url,
     required String username,
     required String password,
+    void Function(int step, String message)? onProgress,
   }) async {
     await _checkProviderLimit();
+
+    final tempProvider = db.Provider(
+      id: id,
+      name: name,
+      type: 'xtream',
+      url: url,
+      username: username,
+      password: password,
+      sortOrder: 0,
+      enabled: true,
+      lastRefresh: null,
+      createdAt: DateTime.now(),
+    );
+
+    // Verify & fetch channels FIRST before adding to DB
+    final channels = await _refreshXtream(tempProvider, onProgress: onProgress);
+    if (channels.isEmpty) {
+      throw const XtreamException('No channels or streams found on this IPTV account.');
+    }
+
+    onProgress?.call(4, 'Saving playlist to database...');
     await _db.upsertProvider(db.ProvidersCompanion.insert(
       id: id,
       name: name,
@@ -92,12 +146,22 @@ class ProviderManager {
       username: Value(username),
       password: Value(password),
     ));
-    try {
-      await refreshProvider(id);
-    } catch (e) {
-      await _db.deleteProvider(id);
-      rethrow;
-    }
+
+    await _db.upsertChannels(channels.map((c) => db.ChannelsCompanion.insert(
+      id: c.id,
+      providerId: c.providerId,
+      name: c.name,
+      tvgId: Value(c.tvgId),
+      tvgName: Value(c.tvgName),
+      tvgLogo: Value(c.tvgLogo),
+      groupTitle: Value(c.groupTitle),
+      channelNumber: Value(c.channelNumber),
+      streamUrl: c.streamUrl,
+      streamType: Value(c.streamType.name),
+    )).toList());
+
+    _resolveChannelLogos(channels).catchError((_) {});
+    return channels.length;
   }
 
   /// Refresh a provider's channels from its source.
@@ -112,6 +176,10 @@ class ProviderManager {
       channels = await _refreshXtream(provider);
     } else {
       return 0;
+    }
+
+    if (channels.isEmpty) {
+      throw Exception('No channels found for this provider.');
     }
 
     // Save channels to database
@@ -134,7 +202,10 @@ class ProviderManager {
     return channels.length;
   }
 
-  Future<List<Channel>> _refreshM3u(db.Provider provider) async {
+  Future<List<Channel>> _refreshM3u(
+    db.Provider provider, {
+    void Function(int step, String message)? onProgress,
+  }) async {
     final xtreamCreds = parseXtreamFromM3uUrl(provider.url ?? '');
     if (xtreamCreds != null) {
       final client = XtreamClient(
@@ -143,6 +214,10 @@ class ProviderManager {
         password: xtreamCreds.password,
       );
       try {
+        onProgress?.call(1, 'Verifying Xtream credentials...');
+        await client.authenticate();
+
+        onProgress?.call(2, 'Loading categories...');
         final liveCats = await client.getLiveCategories();
         final liveCatMap = {for (final c in liveCats) c.id: c.name};
         final vodCats = await client.getVodCategories();
@@ -150,6 +225,7 @@ class ProviderManager {
         final seriesCats = await client.getSeriesCategories();
         final seriesCatMap = {for (final c in seriesCats) c.id: c.name};
 
+        onProgress?.call(3, 'Loading channels & catalog...');
         final lives = await client.getLiveStreams(providerId: provider.id, categoryMap: liveCatMap);
         List<Channel> vods = [];
         try {
@@ -159,12 +235,17 @@ class ProviderManager {
         try {
           series = await client.getSeriesStreams(providerId: provider.id, categoryMap: seriesCatMap);
         } catch (_) {}
-        return [...lives, ...vods, ...series];
+
+        final all = [...lives, ...vods, ...series];
+        if (all.isNotEmpty) return all;
+      } catch (e) {
+        debugPrint('[M3uXtream] Xtream API check failed: $e; falling back to direct download');
       } finally {
         client.dispose();
       }
     }
 
+    onProgress?.call(1, 'Connecting to M3U URL...');
     final dio = Dio(
       BaseOptions(
         connectTimeout: const Duration(seconds: 20),
@@ -173,26 +254,60 @@ class ProviderManager {
           'User-Agent': 'IPTVSmartersPro/1.0.0 (Linux; Android 12)',
           'Accept': '*/*',
         },
-        validateStatus: (status) => status != null && status < 900,
       ),
     );
     try {
       final response = await dio.get<String>(provider.url!);
-      final result = _m3uParser.parse(response.data!, providerId: provider.id);
+      if (response.statusCode != null && (response.statusCode! < 200 || response.statusCode! >= 300)) {
+        throw Exception('Server returned HTTP ${response.statusCode} when loading M3U');
+      }
+
+      final body = response.data?.trim() ?? '';
+      if (body.isEmpty) {
+        throw Exception('M3U playlist is empty (0 bytes received)');
+      }
+
+      if (body.startsWith('<!DOCTYPE') || body.startsWith('<html') || body.startsWith('<?xml') || body.startsWith('{')) {
+        throw Exception('URL returned a web page or invalid document instead of an M3U playlist');
+      }
+
+      onProgress?.call(2, 'Parsing playlist...');
+      final result = _m3uParser.parse(body, providerId: provider.id);
+      if (result.channels.isEmpty) {
+        final err = result.errors.isNotEmpty ? result.errors.first : 'No valid channels found in M3U file';
+        throw Exception(err);
+      }
+
+      onProgress?.call(3, 'Parsed ${result.channels.length} channels');
       return result.channels;
+    } on DioException catch (e) {
+      final code = e.response?.statusCode;
+      if (code == 404) {
+        throw Exception('M3U playlist not found (HTTP 404)');
+      }
+      throw Exception('Could not reach playlist URL: ${e.message ?? e.type.name}');
     } finally {
       dio.close();
     }
   }
 
-  Future<List<Channel>> _refreshXtream(db.Provider provider) async {
+  Future<List<Channel>> _refreshXtream(
+    db.Provider provider, {
+    void Function(int step, String message)? onProgress,
+  }) async {
     final client = XtreamClient(
       baseUrl: provider.url!,
-      username: provider.username!,
-      password: provider.password!,
+      username: provider.username ?? '',
+      password: provider.password ?? '',
     );
     try {
-      // 1. Fetch category mappings
+      // 1. Authenticate FIRST! If credentials are fake, this will throw XtreamAuthException immediately!
+      onProgress?.call(1, 'Authenticating credentials with Xtream server...');
+      final auth = await client.authenticate();
+      debugPrint('[Xtream] Authentication verified: status=${auth.status}, user=${provider.username}');
+
+      // 2. Fetch category mappings
+      onProgress?.call(2, 'Loading categories...');
       Map<String, String> liveCatMap = {};
       try {
         final liveCats = await client.getLiveCategories();
@@ -217,7 +332,8 @@ class ProviderManager {
         debugPrint('[Xtream] Could not fetch series categories: $e');
       }
 
-      // 2. Fetch streams with resolved categories
+      // 3. Fetch streams with resolved categories
+      onProgress?.call(3, 'Loading catalog & streams...');
       final lives = await client.getLiveStreams(
         providerId: provider.id,
         categoryMap: liveCatMap,
@@ -239,7 +355,12 @@ class ProviderManager {
         );
       } catch (_) {}
 
-      return [...lives, ...vods, ...series];
+      final total = [...lives, ...vods, ...series];
+      if (total.isEmpty) {
+        throw const XtreamException('Authentication succeeded, but no streams or channels were found on this account.');
+      }
+
+      return total;
     } finally {
       client.dispose();
     }

@@ -2,6 +2,21 @@ import 'dart:convert';
 import 'package:dio/dio.dart';
 import '../../models/channel.dart';
 
+class XtreamException implements Exception {
+  final String message;
+  const XtreamException(this.message);
+  @override
+  String toString() => message;
+}
+
+class XtreamAuthException extends XtreamException {
+  const XtreamAuthException(super.message);
+}
+
+class XtreamServerException extends XtreamException {
+  const XtreamServerException(super.message);
+}
+
 /// Xtream Codes API client.
 ///
 /// Supports both Xtream Codes and XUI APIs which share the same player_api.php
@@ -25,14 +40,13 @@ class XtreamClient {
       ..headers = {
         'User-Agent': 'IPTVSmartersPro/1.0.0 (Linux; Android 12)',
         'Accept': '*/*',
-      }
-      ..validateStatus = (status) => status != null && status < 900;
+      };
   }
 
-  String get _apiBase {
-    final clean = baseUrl.endsWith('/') ? baseUrl.substring(0, baseUrl.length - 1) : baseUrl;
-    return '$clean/player_api.php';
-  }
+  String get _cleanBaseUrl =>
+      baseUrl.endsWith('/') ? baseUrl.substring(0, baseUrl.length - 1) : baseUrl;
+
+  String get _apiBase => '$_cleanBaseUrl/player_api.php';
 
   static dynamic _parseJson(dynamic data) {
     if (data is String) {
@@ -51,16 +65,75 @@ class XtreamClient {
       };
 
   /// Authenticate and get server info + account status.
+  /// Throws [XtreamAuthException] if credentials are wrong, expired, or disabled.
+  /// Throws [XtreamServerException] if the server returns HTTP errors or invalid non-Xtream data.
   Future<XtreamServerInfo> authenticate() async {
-    final response = await _dio.get(
-      _apiBase,
-      queryParameters: _authParams,
-    );
-    final data = _parseJson(response.data);
-    if (data is Map<String, dynamic>) {
-      return XtreamServerInfo.fromJson(data);
+    final Response<dynamic> response;
+    try {
+      response = await _dio.get(
+        _apiBase,
+        queryParameters: _authParams,
+      );
+    } on DioException catch (e) {
+      final code = e.response?.statusCode;
+      if (code == 401 || code == 403) {
+        throw const XtreamAuthException('Invalid username or password (HTTP 401/403)');
+      }
+      if (code == 404) {
+        throw const XtreamServerException('Xtream Codes API endpoint not found on this server (HTTP 404)');
+      }
+      throw XtreamServerException('Connection failed: ${e.message ?? e.type.name}');
     }
-    throw Exception('Invalid server response');
+
+    if (response.statusCode != null && (response.statusCode! < 200 || response.statusCode! >= 300)) {
+      throw XtreamServerException('Server returned HTTP ${response.statusCode}');
+    }
+
+    final data = _parseJson(response.data);
+    if (data is! Map<String, dynamic>) {
+      throw const XtreamServerException('Server returned an invalid response (not a valid Xtream Codes server)');
+    }
+
+    final userInfo = data['user_info'] as Map<String, dynamic>?;
+    if (userInfo == null) {
+      throw const XtreamServerException('Invalid Xtream server: response missing "user_info"');
+    }
+
+    final rawAuth = userInfo['auth'];
+    final int authNum = rawAuth is int ? rawAuth : (int.tryParse('$rawAuth') ?? 0);
+    final status = userInfo['status']?.toString().trim();
+    final message = userInfo['message']?.toString().trim();
+
+    // Check auth flag: 0 means authentication failed
+    if (authNum == 0) {
+      final reason = (message != null && message.isNotEmpty)
+          ? message
+          : (status != null && status.isNotEmpty
+              ? 'Account $status'
+              : 'Invalid username or password');
+      throw XtreamAuthException('Login failed: $reason');
+    }
+
+    // Check account status if present
+    if (status != null && status.isNotEmpty && status.toLowerCase() != 'active') {
+      final reason = (message != null && message.isNotEmpty) ? message : status;
+      throw XtreamAuthException('Account is not active ($reason)');
+    }
+
+    // Check account expiration if specified
+    final exp = userInfo['exp_date'];
+    if (exp != null && exp != '' && exp != 'null') {
+      final expSec = int.tryParse(exp.toString());
+      if (expSec != null && expSec > 0) {
+        final expDate = DateTime.fromMillisecondsSinceEpoch(expSec * 1000);
+        if (DateTime.now().isAfter(expDate)) {
+          final dateStr = expDate.toLocal().toString().split(' ')[0];
+          throw XtreamAuthException('Account subscription expired on $dateStr');
+        }
+      }
+    }
+
+    return XtreamServerInfo.fromJson(data);
   }
 
   /// Get live stream categories.
@@ -169,17 +242,17 @@ class XtreamClient {
 
   /// Build a live stream URL.
   String buildLiveUrl(int streamId, {String extension = 'ts'}) {
-    return '$baseUrl/live/$username/$password/$streamId.$extension';
+    return '$_cleanBaseUrl/live/$username/$password/$streamId.$extension';
   }
 
   /// Build a VOD stream URL.
   String buildVodUrl(int streamId, {String extension = 'mp4'}) {
-    return '$baseUrl/movie/$username/$password/$streamId.$extension';
+    return '$_cleanBaseUrl/movie/$username/$password/$streamId.$extension';
   }
 
   /// Build a series episode stream URL.
   String buildSeriesEpisodeUrl(dynamic episodeId, {String extension = 'mp4'}) {
-    return '$baseUrl/series/$username/$password/$episodeId.$extension';
+    return '$_cleanBaseUrl/series/$username/$password/$episodeId.$extension';
   }
 
   /// Get series info including all seasons and episode streams from Xtream Codes.
@@ -323,6 +396,8 @@ class XtreamServerInfo {
   final String? httpsPort;
   final String? serverProtocol;
   final String? status;
+  final int? auth;
+  final String? message;
   final DateTime? expDate;
   final int? maxConnections;
   final int? activeCons;
@@ -334,13 +409,15 @@ class XtreamServerInfo {
     this.httpsPort,
     this.serverProtocol,
     this.status,
+    this.auth,
+    this.message,
     this.expDate,
     this.maxConnections,
     this.activeCons,
     this.isTrial = false,
   });
 
-  bool get isActive => status == 'Active';
+  bool get isActive => (status == null || status!.toLowerCase() == 'active') && auth != 0;
 
   factory XtreamServerInfo.fromJson(Map<String, dynamic> json) {
     final userInfo = json['user_info'] as Map<String, dynamic>? ?? {};
@@ -349,10 +426,14 @@ class XtreamServerInfo {
     DateTime? expDate;
     final exp = userInfo['exp_date'];
     if (exp != null && exp != '' && exp != 'null') {
-      expDate = DateTime.fromMillisecondsSinceEpoch(
-        int.parse(exp.toString()) * 1000,
-      );
+      final expSec = int.tryParse(exp.toString());
+      if (expSec != null && expSec > 0) {
+        expDate = DateTime.fromMillisecondsSinceEpoch(expSec * 1000);
+      }
     }
+
+    final rawAuth = userInfo['auth'];
+    final int? auth = rawAuth is int ? rawAuth : int.tryParse('$rawAuth');
 
     return XtreamServerInfo(
       url: serverInfo['url'] as String?,
@@ -360,6 +441,8 @@ class XtreamServerInfo {
       httpsPort: serverInfo['https_port']?.toString(),
       serverProtocol: serverInfo['server_protocol'] as String?,
       status: userInfo['status'] as String?,
+      auth: auth,
+      message: userInfo['message']?.toString(),
       expDate: expDate,
       maxConnections: int.tryParse('${userInfo['max_connections']}'),
       activeCons: int.tryParse('${userInfo['active_cons']}'),
