@@ -104,6 +104,11 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
   final _firstChannelFocusNode = FocusNode(debugLabel: 'channel-first');
   String _sidebarSearchQuery = '';
 
+  // Compact / Mobile layout state
+  bool _compactShowPreview = true;
+  bool _compactSearchOpen = false;
+  final _compactSearchController = TextEditingController();
+
   // Top bar auto-hide
   double _topBarOpacity = 1.0;
   Timer? _topBarTimer;
@@ -558,6 +563,7 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
       ref.read(playerServiceProvider).stop();
     } catch (_) {}
     _searchController.dispose();
+    _compactSearchController.dispose();
     _searchFocusNode.dispose();
     _sidebarSearchController.dispose();
     _sidebarFocusNode.dispose();
@@ -1556,47 +1562,55 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
             body: Stack(
               children: [
                 SafeArea(
-                  child: Row(
-                    children: [
-                      // Column 1: Categories (30%)
-                      _sidebarExpanded
-                          ? Expanded(flex: 3, child: _buildSidebar())
-                          : SizedBox(width: 44, child: _buildSidebar()),
+                  child: LayoutBuilder(
+                    builder: (context, constraints) {
+                      final isCompact = constraints.maxWidth < 750;
+                      if (isCompact) {
+                        return _buildCompactLayout(context, constraints);
+                      }
+                      return Row(
+                        children: [
+                          // Column 1: Categories (30%)
+                          _sidebarExpanded
+                              ? Expanded(flex: 3, child: _buildSidebar())
+                              : SizedBox(width: 44, child: _buildSidebar()),
 
-                      // Column 2: Channels List (30%)
-                      Expanded(
-                        flex: _sidebarExpanded ? 3 : 5,
-                        child: Stack(
-                          children: [
-                            _buildChannelList(),
-                            if (_showFailoverBanner && _failoverSuggestion != null)
-                              Positioned(
-                                top: 0, left: 0, right: 0,
-                                child: _buildFailoverBanner(),
-                              ),
-                            if (_multiSelectMode)
-                              Positioned(
-                                left: 8, right: 8, bottom: 8,
-                                child: _buildMultiSelectBar(),
-                              ),
-                          ],
-                        ),
-                      ),
-
-                      // Column 3: Live Preview Panel (40%)
-                      Expanded(
-                        flex: _sidebarExpanded ? 4 : 5,
-                        child: Container(
-                          decoration: const BoxDecoration(
-                            color: Color(0xFF10101C),
-                            border: Border(
-                              left: BorderSide(color: Color(0xFF1E1E2E), width: 1),
+                          // Column 2: Channels List (30%)
+                          Expanded(
+                            flex: _sidebarExpanded ? 3 : 5,
+                            child: Stack(
+                              children: [
+                                _buildChannelList(),
+                                if (_showFailoverBanner && _failoverSuggestion != null)
+                                  Positioned(
+                                    top: 0, left: 0, right: 0,
+                                    child: _buildFailoverBanner(),
+                                  ),
+                                if (_multiSelectMode)
+                                  Positioned(
+                                    left: 8, right: 8, bottom: 8,
+                                    child: _buildMultiSelectBar(),
+                                  ),
+                              ],
                             ),
                           ),
-                          child: _buildThreeColumnPreviewPanel(),
-                        ),
-                      ),
-                    ],
+
+                          // Column 3: Live Preview Panel (40%)
+                          Expanded(
+                            flex: _sidebarExpanded ? 4 : 5,
+                            child: Container(
+                              decoration: const BoxDecoration(
+                                color: Color(0xFF10101C),
+                                border: Border(
+                                  left: BorderSide(color: Color(0xFF1E1E2E), width: 1),
+                                ),
+                              ),
+                              child: _buildThreeColumnPreviewPanel(),
+                            ),
+                          ),
+                        ],
+                      );
+                    },
                   ),
                 ),
 
@@ -1837,6 +1851,644 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
           const WeatherClockWidget(),
         ],
       ),
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // ── Mobile / Compact Layout (< 750px)
+  // ─────────────────────────────────────────────────────────────
+  Widget _buildCompactLayout(BuildContext context, BoxConstraints constraints) {
+    final playerService = ref.watch(playerServiceProvider);
+    final activeChannel = _previewChannel ?? (_filteredChannels.isNotEmpty ? _filteredChannels.first : null);
+
+    return Column(
+      children: [
+        // ── 1. Top Mobile Bar ──
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: const BoxDecoration(
+            color: Color(0xFF0E0D1B),
+            border: Border(bottom: BorderSide(color: Color(0xFF1E1D2F), width: 1)),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(
+                children: [
+                  // Back button
+                  InkWell(
+                    onTap: () {
+                      if (context.canPop()) {
+                        context.pop();
+                      } else {
+                        context.go('/home');
+                      }
+                    },
+                    borderRadius: BorderRadius.circular(8),
+                    child: Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.06),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.white10),
+                      ),
+                      child: const Icon(Icons.arrow_back_ios_new_rounded, size: 16, color: Colors.white),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+
+                  // Title + Channel count
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          _selectedGroup == 'All' || _selectedGroup.isEmpty
+                              ? 'Live TV'
+                              : _selectedGroup == 'Favorites'
+                                  ? '★ Favorites'
+                                  : _selectedGroup,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 15,
+                            fontWeight: FontWeight.bold,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        Text(
+                          '${_filteredChannels.length} ${_filteredChannels.length == 1 ? "channel" : "channels"}',
+                          style: const TextStyle(
+                            color: Colors.white54,
+                            fontSize: 11,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  // Search toggle button
+                  IconButton(
+                    icon: Icon(
+                      _compactSearchOpen ? Icons.close_rounded : Icons.search_rounded,
+                      color: _compactSearchOpen ? const Color(0xFFA78BFA) : Colors.white70,
+                      size: 20,
+                    ),
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+                    onPressed: () {
+                      setState(() {
+                        _compactSearchOpen = !_compactSearchOpen;
+                        if (!_compactSearchOpen) {
+                          _compactSearchController.clear();
+                          _searchQuery = '';
+                          _sidebarSearchQuery = '';
+                          _applyFilters();
+                        }
+                      });
+                    },
+                  ),
+
+                  // Category Sheet Button
+                  IconButton(
+                    icon: const Icon(Icons.tune_rounded, color: Colors.white70, size: 20),
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+                    tooltip: 'Categories',
+                    onPressed: () => _showMobileCategorySheet(context),
+                  ),
+
+                  // Toggle video preview button
+                  IconButton(
+                    icon: Icon(
+                      _compactShowPreview ? Icons.videocam_rounded : Icons.videocam_off_rounded,
+                      color: _compactShowPreview ? const Color(0xFF6C5CE7) : Colors.white38,
+                      size: 20,
+                    ),
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+                    tooltip: _compactShowPreview ? 'Hide preview' : 'Show preview',
+                    onPressed: () => setState(() => _compactShowPreview = !_compactShowPreview),
+                  ),
+                ],
+              ),
+
+              // Search field (when open)
+              if (_compactSearchOpen) ...[
+                const SizedBox(height: 8),
+                SizedBox(
+                  height: 38,
+                  child: TextField(
+                    controller: _compactSearchController,
+                    autofocus: true,
+                    style: const TextStyle(color: Colors.white, fontSize: 13),
+                    decoration: InputDecoration(
+                      hintText: 'Search channel name or number…',
+                      hintStyle: const TextStyle(color: Colors.white38, fontSize: 13),
+                      prefixIcon: const Icon(Icons.search_rounded, size: 18, color: Colors.white38),
+                      suffixIcon: _compactSearchController.text.isNotEmpty
+                          ? GestureDetector(
+                              onTap: () {
+                                _compactSearchController.clear();
+                                setState(() {
+                                  _searchQuery = '';
+                                  _sidebarSearchQuery = '';
+                                  _applyFilters();
+                                });
+                              },
+                              child: const Icon(Icons.close_rounded, size: 16, color: Colors.white38),
+                            )
+                          : null,
+                      filled: true,
+                      fillColor: Colors.white.withValues(alpha: 0.08),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: BorderSide.none,
+                      ),
+                    ),
+                    onChanged: (val) {
+                      _searchDebounce?.cancel();
+                      final q = val.trim();
+                      _searchDebounce = Timer(const Duration(milliseconds: 250), () {
+                        if (mounted) {
+                          setState(() {
+                            _searchQuery = q;
+                            _sidebarSearchQuery = q;
+                            _applyFilters();
+                          });
+                        }
+                      });
+                    },
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+
+        // ── 2. Top Video Preview (16:9) (if enabled) ──
+        if (_compactShowPreview && activeChannel != null)
+          Container(
+            padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
+            child: AspectRatio(
+              aspectRatio: 16 / 9,
+              child: Container(
+                decoration: BoxDecoration(
+                  color: Colors.black,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: const Color(0xFF26243A)),
+                  boxShadow: const [
+                    BoxShadow(
+                      color: Colors.black54,
+                      blurRadius: 10,
+                      offset: Offset(0, 4),
+                    ),
+                  ],
+                ),
+                clipBehavior: Clip.antiAlias,
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    GestureDetector(
+                      onTap: () => _goFullscreen(activeChannel),
+                      child: Video(
+                        controller: playerService.videoController,
+                        controls: NoVideoControls,
+                      ),
+                    ),
+                    // Controls overlay banner at bottom
+                    Positioned(
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        decoration: const BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.topCenter,
+                            end: Alignment.bottomCenter,
+                            colors: [Colors.transparent, Color(0xDD000000)],
+                          ),
+                        ),
+                        child: Row(
+                          children: [
+                            if (activeChannel.tvgLogo != null && activeChannel.tvgLogo!.isNotEmpty)
+                              Padding(
+                                padding: const EdgeInsets.only(right: 8),
+                                child: ClipRRect(
+                                  borderRadius: BorderRadius.circular(4),
+                                  child: Image.network(
+                                    activeChannel.tvgLogo!,
+                                    width: 26,
+                                    height: 18,
+                                    fit: BoxFit.contain,
+                                    errorBuilder: (_, __, ___) => const Icon(Icons.tv_rounded, size: 16, color: Colors.white54),
+                                  ),
+                                ),
+                              ),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(
+                                    _channelDisplayName(activeChannel),
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                  Text(
+                                    _getChannelNowPlaying(activeChannel) ?? 'Live broadcast',
+                                    style: const TextStyle(
+                                      color: Colors.white70,
+                                      fontSize: 10,
+                                    ),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ],
+                              ),
+                            ),
+                            // Fullscreen tap button
+                            IconButton(
+                              icon: const Icon(Icons.fullscreen_rounded, color: Colors.white, size: 22),
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                              onPressed: () => _goFullscreen(activeChannel),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    // Tap to play fullscreen prompt in top-left
+                    Positioned(
+                      top: 6,
+                      left: 6,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: Colors.black54,
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: const Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.touch_app_rounded, size: 12, color: Colors.white70),
+                            SizedBox(width: 4),
+                            Text('Tap for fullscreen', style: TextStyle(color: Colors.white70, fontSize: 10)),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+
+        // ── 3. Horizontal Category Chips ──
+        Container(
+          height: 44,
+          padding: const EdgeInsets.symmetric(vertical: 4),
+          decoration: const BoxDecoration(
+            color: Color(0xFF0E0D1B),
+            border: Border(bottom: BorderSide(color: Color(0xFF1E1D2F), width: 1)),
+          ),
+          child: ListView(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            children: [
+              // "All" chip
+              _buildCategoryChip(
+                label: 'All',
+                count: _allChannels.length,
+                isSelected: _selectedGroup == 'All' || _selectedGroup.isEmpty,
+                onTap: () {
+                  setState(() {
+                    _compactSearchController.clear();
+                    _searchQuery = '';
+                    _sidebarSearchQuery = '';
+                    _selectedGroup = 'All';
+                    _applyFilters();
+                    _saveSession();
+                  });
+                  if (_channelListController.hasClients) {
+                    _channelListController.jumpTo(0);
+                  }
+                },
+              ),
+              const SizedBox(width: 8),
+
+              // "Favorites" chip
+              _buildCategoryChip(
+                label: '★ Favorites',
+                count: _favoritedChannelIds.length,
+                isSelected: _selectedGroup == 'Favorites' || _selectedGroup.startsWith('fav:'),
+                onTap: () {
+                  setState(() {
+                    _compactSearchController.clear();
+                    _searchQuery = '';
+                    _sidebarSearchQuery = '';
+                    _selectedGroup = 'Favorites';
+                    _applyFilters();
+                    _saveSession();
+                  });
+                  if (_channelListController.hasClients) {
+                    _channelListController.jumpTo(0);
+                  }
+                },
+              ),
+              const SizedBox(width: 8),
+
+              // Group categories
+              ..._groups.map((group) {
+                final isSelected = _selectedGroup == group;
+                final count = _groupCounts[group] ?? 0;
+                return Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: _buildCategoryChip(
+                    label: group,
+                    count: count,
+                    isSelected: isSelected,
+                    onTap: () {
+                      setState(() {
+                        _compactSearchController.clear();
+                        _searchQuery = '';
+                        _sidebarSearchQuery = '';
+                        _selectedGroup = group;
+                        _applyFilters();
+                        _saveSession();
+                      });
+                      if (_channelListController.hasClients) {
+                        _channelListController.jumpTo(0);
+                      }
+                    },
+                  ),
+                );
+              }),
+            ],
+          ),
+        ),
+
+        // ── 4. Channels List ──
+        Expanded(
+          child: Stack(
+            children: [
+              _buildChannelList(),
+              if (_showFailoverBanner && _failoverSuggestion != null)
+                Positioned(
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  child: _buildFailoverBanner(),
+                ),
+              if (_multiSelectMode)
+                Positioned(
+                  left: 8,
+                  right: 8,
+                  bottom: 8,
+                  child: _buildMultiSelectBar(),
+                ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildCategoryChip({
+    required String label,
+    required int count,
+    required bool isSelected,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(16),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+        decoration: BoxDecoration(
+          color: isSelected ? const Color(0xFF6C5CE7) : const Color(0xFF1B1A2C),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: isSelected ? const Color(0xFFA78BFA) : const Color(0xFF2A2840),
+            width: 1,
+          ),
+          boxShadow: isSelected
+              ? [
+                  BoxShadow(
+                    color: const Color(0xFF6C5CE7).withValues(alpha: 0.35),
+                    blurRadius: 8,
+                    offset: const Offset(0, 2),
+                  ),
+                ]
+              : null,
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              label,
+              style: TextStyle(
+                color: isSelected ? Colors.white : Colors.white70,
+                fontSize: 12,
+                fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+              ),
+            ),
+            const SizedBox(width: 6),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+              decoration: BoxDecoration(
+                color: isSelected ? Colors.black26 : Colors.white.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Text(
+                '$count',
+                style: TextStyle(
+                  color: isSelected ? Colors.white : Colors.white38,
+                  fontSize: 10,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showMobileCategorySheet(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF10101C),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      isScrollControlled: true,
+      builder: (sheetCtx) {
+        String filter = '';
+        return StatefulBuilder(
+          builder: (ctx, setSheetState) {
+            final filteredGroups = _groups.where((g) {
+              if (filter.isEmpty) return true;
+              return g.toLowerCase().contains(filter.toLowerCase());
+            }).toList();
+
+            return DraggableScrollableSheet(
+              initialChildSize: 0.7,
+              minChildSize: 0.4,
+              maxChildSize: 0.9,
+              expand: false,
+              builder: (_, scrollController) {
+                return Column(
+                  children: [
+                    // Drag handle
+                    Container(
+                      margin: const EdgeInsets.symmetric(vertical: 10),
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: Colors.white24,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                    // Header
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.category_rounded, color: Color(0xFFA78BFA), size: 20),
+                          const SizedBox(width: 8),
+                          const Text(
+                            'Categories',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const Spacer(),
+                          Text(
+                            '${_groups.length} total',
+                            style: const TextStyle(color: Colors.white38, fontSize: 12),
+                          ),
+                        ],
+                      ),
+                    ),
+                    // Search categories
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      child: SizedBox(
+                        height: 36,
+                        child: TextField(
+                          style: const TextStyle(color: Colors.white, fontSize: 13),
+                          decoration: InputDecoration(
+                            hintText: 'Filter categories…',
+                            hintStyle: const TextStyle(color: Colors.white38, fontSize: 13),
+                            prefixIcon: const Icon(Icons.search_rounded, size: 16, color: Colors.white38),
+                            filled: true,
+                            fillColor: Colors.white.withValues(alpha: 0.06),
+                            contentPadding: const EdgeInsets.symmetric(horizontal: 10),
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8),
+                              borderSide: BorderSide.none,
+                            ),
+                          ),
+                          onChanged: (val) {
+                            setSheetState(() => filter = val.trim());
+                          },
+                        ),
+                      ),
+                    ),
+                    const Divider(color: Color(0xFF1E1D2F), height: 1),
+                    // Category list
+                    Expanded(
+                      child: ListView.builder(
+                        controller: scrollController,
+                        itemCount: filteredGroups.length + 2,
+                        itemBuilder: (context, index) {
+                          if (index == 0) {
+                            final isSel = _selectedGroup == 'All' || _selectedGroup.isEmpty;
+                            return ListTile(
+                              leading: Icon(Icons.apps_rounded, color: isSel ? const Color(0xFF6C5CE7) : Colors.white54, size: 20),
+                              title: const Text('All Channels', style: TextStyle(color: Colors.white, fontSize: 14)),
+                              trailing: Text('${_allChannels.length}', style: const TextStyle(color: Colors.white38, fontSize: 12)),
+                              selected: isSel,
+                              selectedTileColor: const Color(0xFF6C5CE7).withValues(alpha: 0.15),
+                              onTap: () {
+                                Navigator.pop(sheetCtx);
+                                setState(() {
+                                  _compactSearchController.clear();
+                                  _searchQuery = '';
+                                  _sidebarSearchQuery = '';
+                                  _selectedGroup = 'All';
+                                  _applyFilters();
+                                  _saveSession();
+                                });
+                                if (_channelListController.hasClients) _channelListController.jumpTo(0);
+                              },
+                            );
+                          }
+                          if (index == 1) {
+                            final isSel = _selectedGroup == 'Favorites' || _selectedGroup.startsWith('fav:');
+                            return ListTile(
+                              leading: Icon(Icons.star_rounded, color: isSel ? Colors.amber : Colors.amber.withValues(alpha: 0.6), size: 20),
+                              title: const Text('Favorites', style: TextStyle(color: Colors.white, fontSize: 14)),
+                              trailing: Text('${_favoritedChannelIds.length}', style: const TextStyle(color: Colors.white38, fontSize: 12)),
+                              selected: isSel,
+                              selectedTileColor: const Color(0xFF6C5CE7).withValues(alpha: 0.15),
+                              onTap: () {
+                                Navigator.pop(sheetCtx);
+                                setState(() {
+                                  _compactSearchController.clear();
+                                  _searchQuery = '';
+                                  _sidebarSearchQuery = '';
+                                  _selectedGroup = 'Favorites';
+                                  _applyFilters();
+                                  _saveSession();
+                                });
+                                if (_channelListController.hasClients) _channelListController.jumpTo(0);
+                              },
+                            );
+                          }
+                          final group = filteredGroups[index - 2];
+                          final isSel = _selectedGroup == group;
+                          final count = _groupCounts[group] ?? 0;
+                          return ListTile(
+                            leading: Icon(Icons.folder_rounded, color: isSel ? const Color(0xFF6C5CE7) : Colors.white38, size: 20),
+                            title: Text(group, style: const TextStyle(color: Colors.white, fontSize: 14)),
+                            trailing: Text('$count', style: const TextStyle(color: Colors.white38, fontSize: 12)),
+                            selected: isSel,
+                            selectedTileColor: const Color(0xFF6C5CE7).withValues(alpha: 0.15),
+                            onTap: () {
+                              Navigator.pop(sheetCtx);
+                              setState(() {
+                                _compactSearchController.clear();
+                                _searchQuery = '';
+                                _sidebarSearchQuery = '';
+                                _selectedGroup = group;
+                                _applyFilters();
+                                _saveSession();
+                              });
+                              if (_channelListController.hasClients) _channelListController.jumpTo(0);
+                            },
+                          );
+                        },
+                      ),
+                    ),
+                  ],
+                );
+              },
+            );
+          },
+        );
+      },
     );
   }
 
@@ -3460,7 +4112,10 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
                           }
                         });
                       } else {
-                        _selectChannel(index);
+                        _selectChannel(index, forcePlay: true);
+                        if (!_compactShowPreview) {
+                          _goFullscreen(channel);
+                        }
                       }
                     },
                     onDoubleTap: () => _goFullscreen(channel),

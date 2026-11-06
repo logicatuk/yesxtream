@@ -115,8 +115,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               SafeArea(
                 child: LayoutBuilder(
                   builder: (context, constraints) {
-                    final isLandscape = constraints.maxWidth >= 650 &&
-                        constraints.maxWidth > constraints.maxHeight;
+                    final isLandscape = constraints.maxWidth >= 780 &&
+                        constraints.maxWidth > constraints.maxHeight &&
+                        constraints.maxHeight >= 420;
 
                     if (!isLandscape) {
                       return _buildCompactLayout(
@@ -177,9 +178,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   // ─────────────────────────────────────────────────────────────
   // ── Header (Logo centered, Expiry info on top right)
   // ─────────────────────────────────────────────────────────────
-  // ─────────────────────────────────────────────────────────────
-  // ── Header (Logo centered, Expiry info on top right)
-  // ─────────────────────────────────────────────────────────────
   Widget _buildHeader(
     db.Provider? playlist,
     AccountInfo? accountInfo,
@@ -195,30 +193,65 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       expiryText = '';
     }
 
-    return SizedBox(
-      height: 60,
-      child: Stack(
-        alignment: Alignment.center,
-        children: [
-          // Centered App Logo
-          const Center(child: _BrandLogo()),
-
-          // Expiration notice on the right
-          if (expiryText.isNotEmpty)
-            Positioned(
-              right: 0,
-              child: Text(
-                expiryText,
-                style: const TextStyle(
-                  color: Colors.white70,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w400,
-                  letterSpacing: 0.3,
-                ),
-              ),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isNarrow = constraints.maxWidth < 650;
+        if (isNarrow) {
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 6),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const _BrandLogo(),
+                if (expiryText.isNotEmpty) ...[
+                  const SizedBox(height: 6),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.white12),
+                    ),
+                    child: Text(
+                      expiryText,
+                      style: const TextStyle(
+                        color: Colors.white70,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w500,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ],
             ),
-        ],
-      ),
+          );
+        }
+
+        return SizedBox(
+          height: 60,
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              const Center(child: _BrandLogo()),
+              if (expiryText.isNotEmpty)
+                Positioned(
+                  right: 0,
+                  child: Text(
+                    expiryText,
+                    style: const TextStyle(
+                      color: Colors.white70,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w400,
+                      letterSpacing: 0.3,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        );
+      },
     );
   }
 
@@ -375,28 +408,28 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     AppSettings settings,
   ) {
     return ListView(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       children: [
         _buildHeader(activePlaylist, accountInfo, settings),
-        const SizedBox(height: 20),
+        const SizedBox(height: 12),
 
         // Hero Tile
         SizedBox(
-          height: 180,
+          height: 140,
           child: _TvHeroTile(
             title: settings.tr('live_tv'),
             onTap: () => context.go('/live'),
           ),
         ),
 
-        const SizedBox(height: 14),
+        const SizedBox(height: 10),
 
         // Content Row 1: Films & Séries
         Row(
           children: [
             Expanded(
               child: SizedBox(
-                height: 110,
+                height: 96,
                 child: _TvGridTile(
                   title: settings.tr('movies'),
                   icon: Icons.play_circle_outline_rounded,
@@ -404,10 +437,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                 ),
               ),
             ),
-            const SizedBox(width: 12),
+            const SizedBox(width: 10),
             Expanded(
               child: SizedBox(
-                height: 110,
+                height: 96,
                 child: _TvGridTile(
                   title: settings.tr('series'),
                   icon: Icons.movie_creation_outlined,
@@ -418,14 +451,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           ],
         ),
 
-        const SizedBox(height: 12),
+        const SizedBox(height: 10),
 
         // Content Row 2: Catch-up & Compte
         Row(
           children: [
             Expanded(
               child: SizedBox(
-                height: 110,
+                height: 96,
                 child: _TvGridTile(
                   title: settings.tr('catchup_tv'),
                   icon: Icons.replay_rounded,
@@ -434,10 +467,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                 ),
               ),
             ),
-            const SizedBox(width: 12),
+            const SizedBox(width: 10),
             Expanded(
               child: SizedBox(
-                height: 110,
+                height: 96,
                 child: _TvGridTile(
                   title: settings.tr('account_details'),
                   icon: Icons.people_alt_outlined,
@@ -454,11 +487,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           ],
         ),
 
-        const SizedBox(height: 12),
+        const SizedBox(height: 10),
 
         // Changer playlist wide button
         SizedBox(
-          height: 90,
+          height: 64,
           child: _TvGridTile(
             title: settings.tr('switch_playlist'),
             icon: Icons.switch_account_outlined,
@@ -466,30 +499,49 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           ),
         ),
 
-        const SizedBox(height: 20),
+        const SizedBox(height: 14),
 
-        // Action Buttons
-        _TvActionButton(
-          title: settings.tr('settings'),
-          icon: Icons.settings_outlined,
-          onTap: () => context.go('/settings'),
-        ),
-        const SizedBox(height: 10),
-        _TvActionButton(
-          title: settings.tr('refresh_playlist'),
-          icon: Icons.refresh_rounded,
-          isLoading: _isReloading,
-          onTap: () => _handleReload(activePlaylist, settings),
-        ),
-        const SizedBox(height: 10),
-        _TvActionButton(
-          title: settings.tr('exit_dialog_confirm'),
-          icon: Icons.logout_rounded,
-          isExit: true,
-          onTap: () => _showExitDialog(context, settings),
+        // Action Buttons Row (Clean responsive row)
+        Row(
+          children: [
+            Expanded(
+              child: SizedBox(
+                height: 44,
+                child: _TvActionButton(
+                  title: settings.tr('settings'),
+                  icon: Icons.settings_outlined,
+                  onTap: () => context.go('/settings'),
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: SizedBox(
+                height: 44,
+                child: _TvActionButton(
+                  title: settings.tr('refresh_playlist'),
+                  icon: Icons.refresh_rounded,
+                  isLoading: _isReloading,
+                  onTap: () => _handleReload(activePlaylist, settings),
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: SizedBox(
+                height: 44,
+                child: _TvActionButton(
+                  title: settings.tr('exit_dialog_confirm'),
+                  icon: Icons.logout_rounded,
+                  isExit: true,
+                  onTap: () => _showExitDialog(context, settings),
+                ),
+              ),
+            ),
+          ],
         ),
 
-        const SizedBox(height: 24),
+        const SizedBox(height: 16),
         _buildFooter(),
       ],
     );
@@ -1546,7 +1598,7 @@ class _TvActionButtonState extends State<_TvActionButton> {
           curve: Curves.easeOutCubic,
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 180),
-            padding: const EdgeInsets.symmetric(horizontal: 16),
+            padding: const EdgeInsets.symmetric(horizontal: 10),
             decoration: BoxDecoration(
               color: _highlight
                   ? const Color(0xFF6C5CE7).withValues(alpha: 0.35)
@@ -1568,32 +1620,35 @@ class _TvActionButtonState extends State<_TvActionButton> {
               ],
             ),
             child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 if (widget.isLoading)
                   const SizedBox(
-                    width: 24,
-                    height: 24,
+                    width: 18,
+                    height: 18,
                     child: CircularProgressIndicator(
                       color: Colors.white,
-                      strokeWidth: 2.2,
+                      strokeWidth: 2.0,
                     ),
                   )
                 else
                   Icon(
                     widget.icon,
-                    size: 24,
+                    size: 18,
                     color: Colors.white,
                   ),
-                const SizedBox(width: 14),
-                Expanded(
+                const SizedBox(width: 6),
+                Flexible(
                   child: Text(
                     widget.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                       color: Colors.white,
-                      fontSize: 15,
+                      fontSize: 12,
                       fontWeight:
                           widget.isExit ? FontWeight.w800 : FontWeight.w600,
-                      letterSpacing: widget.isExit ? 0.8 : 0.2,
+                      letterSpacing: widget.isExit ? 0.4 : 0.2,
                     ),
                   ),
                 ),

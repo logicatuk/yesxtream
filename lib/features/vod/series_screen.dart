@@ -112,9 +112,24 @@ class _SeriesScreenState extends ConsumerState<SeriesScreen> {
             return g.toLowerCase().contains(catQuery);
           }).toList();
 
-          return Row(
-            children: [
-              // ── Left Sidebar Categories (IBO Player Pro Style) ──
+          return LayoutBuilder(
+            builder: (context, constraints) {
+              final isCompact = constraints.maxWidth < 750;
+              if (isCompact) {
+                return _buildCompactLayout(
+                  context,
+                  sortedGroups,
+                  categoryCounts,
+                  allCount,
+                  favCount,
+                  filtered,
+                  constraints,
+                );
+              }
+
+              return Row(
+                children: [
+                  // ── Left Sidebar Categories (IBO Player Pro Style) ──
               Container(
                 width: 260,
                 decoration: const BoxDecoration(
@@ -282,7 +297,210 @@ class _SeriesScreenState extends ConsumerState<SeriesScreen> {
               ),
             ],
           );
+            },
+          );
         },
+      ),
+    );
+  }
+
+  Widget _buildCompactLayout(
+    BuildContext context,
+    List<String> sortedGroups,
+    Map<String, int> categoryCounts,
+    int allCount,
+    int favCount,
+    List<db.Channel> filtered,
+    BoxConstraints constraints,
+  ) {
+    final settings = ref.watch(appSettingsProvider);
+    final chips = <Map<String, dynamic>>[
+      {'title': 'All', 'count': allCount, 'label': settings.tr('all')},
+      {'title': 'Favorites', 'count': favCount, 'label': settings.tr('favorites')},
+      ...sortedGroups.map((g) => {'title': g, 'count': categoryCounts[g] ?? 0, 'label': g}),
+    ];
+
+    final isVerySmall = constraints.maxWidth < 420;
+    final crossAxisCount = isVerySmall ? 2 : (constraints.maxWidth < 650 ? 3 : 4);
+
+    return Scaffold(
+      backgroundColor: const Color(0xFF0A0A0F),
+      body: SafeArea(
+        child: Column(
+          children: [
+            // Compact Header: Back, Search, Sort
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              decoration: const BoxDecoration(
+                color: Color(0xFF0F0E1C),
+                border: Border(bottom: BorderSide(color: Color(0xFF1E1D2F), width: 1)),
+              ),
+              child: Row(
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.arrow_back_rounded, color: Colors.white, size: 22),
+                    onPressed: () => context.go('/home'),
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+                  ),
+                  const SizedBox(width: 4),
+                  Expanded(
+                    child: SizedBox(
+                      height: 36,
+                      child: TextField(
+                        controller: _searchController,
+                        onChanged: (val) => setState(() => _searchQuery = val),
+                        style: const TextStyle(color: Colors.white, fontSize: 13),
+                        decoration: InputDecoration(
+                          hintText: '${settings.tr('search_in')} $_selectedCategory…',
+                          hintStyle: const TextStyle(color: Colors.white30, fontSize: 12),
+                          prefixIcon: const Icon(Icons.search, size: 16, color: Colors.white38),
+                          prefixIconConstraints: const BoxConstraints(minWidth: 32),
+                          suffixIcon: _searchQuery.isNotEmpty
+                              ? GestureDetector(
+                                  onTap: () {
+                                    _searchController.clear();
+                                    setState(() => _searchQuery = '');
+                                  },
+                                  child: const Icon(Icons.clear, size: 16, color: Colors.white54),
+                                )
+                              : null,
+                          filled: true,
+                          fillColor: const Color(0xFF1B1A2C),
+                          contentPadding: EdgeInsets.zero,
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8),
+                            borderSide: const BorderSide(color: Color(0xFF2A2840)),
+                          ),
+                          enabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8),
+                            borderSide: const BorderSide(color: Color(0xFF2A2840)),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  // Sort Dropdown
+                  Container(
+                    height: 36,
+                    padding: const EdgeInsets.symmetric(horizontal: 6),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF1B1A2C),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: const Color(0xFF2A2840)),
+                    ),
+                    child: DropdownButtonHideUnderline(
+                      child: DropdownButton<SeriesSortOption>(
+                        value: _sortOption,
+                        isDense: true,
+                        dropdownColor: const Color(0xFF1B1A2C),
+                        icon: const Icon(Icons.sort_rounded, color: Color(0xFF6C5CE7), size: 18),
+                        items: [
+                          DropdownMenuItem(value: SeriesSortOption.recent, child: Text(settings.tr('sort_recent'), style: const TextStyle(color: Colors.white, fontSize: 12))),
+                          DropdownMenuItem(value: SeriesSortOption.alphabetical, child: Text(settings.tr('sort_alphabetical'), style: const TextStyle(color: Colors.white, fontSize: 12))),
+                          DropdownMenuItem(value: SeriesSortOption.year, child: Text(settings.tr('sort_year'), style: const TextStyle(color: Colors.white, fontSize: 12))),
+                        ],
+                        onChanged: (val) {
+                          if (val != null) setState(() => _sortOption = val);
+                        },
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            // Horizontal Category Chips
+            Container(
+              height: 44,
+              decoration: const BoxDecoration(
+                color: Color(0xFF0C0B18),
+                border: Border(bottom: BorderSide(color: Color(0xFF1E1D2F), width: 1)),
+              ),
+              child: ListView.builder(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                itemCount: chips.length,
+                itemBuilder: (context, index) {
+                  final chip = chips[index];
+                  final title = chip['title'] as String;
+                  final label = chip['label'] as String;
+                  final count = chip['count'] as int;
+                  final isSelected = _selectedCategory == title;
+                  return Padding(
+                    padding: const EdgeInsets.only(right: 6),
+                    child: InkWell(
+                      onTap: () => setState(() => _selectedCategory = title),
+                      borderRadius: BorderRadius.circular(16),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: isSelected
+                              ? const Color(0xFF6C5CE7).withValues(alpha: 0.3)
+                              : const Color(0xFF181728),
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(
+                            color: isSelected
+                                ? const Color(0xFFFFD32A)
+                                : const Color(0xFF2A2840),
+                            width: isSelected ? 1.5 : 1.0,
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              label,
+                              style: TextStyle(
+                                color: isSelected ? const Color(0xFFFFD32A) : Colors.white,
+                                fontSize: 12,
+                                fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+                              ),
+                            ),
+                            const SizedBox(width: 4),
+                            Text(
+                              '($count)',
+                              style: TextStyle(
+                                color: isSelected ? const Color(0xFFFFD32A) : Colors.white38,
+                                fontSize: 10,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+
+            // Main Series Grid (Full Screen Width)
+            Expanded(
+              child: filtered.isEmpty
+                  ? const Center(
+                      child: Text(
+                        'No series found in this category',
+                        style: TextStyle(color: Colors.white38),
+                      ),
+                    )
+                  : GridView.builder(
+                      padding: const EdgeInsets.all(10),
+                      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                        crossAxisCount: crossAxisCount,
+                        childAspectRatio: 0.62,
+                        crossAxisSpacing: 10,
+                        mainAxisSpacing: 10,
+                      ),
+                      itemCount: filtered.length,
+                      itemBuilder: (context, index) {
+                        final s = filtered[index];
+                        return _SeriesCard(series: s);
+                      },
+                    ),
+            ),
+          ],
+        ),
       ),
     );
   }

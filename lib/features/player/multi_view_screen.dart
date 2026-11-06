@@ -49,8 +49,6 @@ class _MultiViewScreenState extends ConsumerState<MultiViewScreen> {
       try {
         final np = player.platform as dynamic;
         np.setProperty('hwdec', 'mediacodec-copy');
-        np.setProperty('vo', 'gpu');
-        np.setProperty('framedrop', 'vo');
         np.setProperty('cache', 'yes');
         np.setProperty('cache-secs', '10');
         np.setProperty('demuxer-max-bytes', '50M');

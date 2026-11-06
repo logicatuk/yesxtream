@@ -105,17 +105,9 @@ class _VodPlayerScreenState extends ConsumerState<VodPlayerScreen> {
   }
 
   void _initPlayer() async {
-    // 1. Immediately stop any background live stream player to prevent 2 players running
-    try {
-      ref.read(playerServiceProvider).stop();
-    } catch (_) {}
-
-    _player = Player(
-      configuration: const PlayerConfiguration(
-        logLevel: MPVLogLevel.warn,
-      ),
-    );
-    _videoController = VideoController(_player);
+    final playerService = ref.read(playerServiceProvider);
+    _player = playerService.player;
+    _videoController = playerService.videoController;
 
     final settings = ref.read(appSettingsProvider);
     final useHwAcc = settings.hardwareAcceleration;
@@ -131,22 +123,22 @@ class _VodPlayerScreenState extends ConsumerState<VodPlayerScreen> {
     if (_aspectRatioIndex < 0) _aspectRatioIndex = 0;
 
     final dynamic np = _player.platform;
-    if (np != null) {
-      await np.setProperty('user-agent', 'IPTVSmartersPro/1.0.0 (Linux; Android 12)');
-      await np.setProperty('http-header-fields', 'User-Agent: IPTVSmartersPro/1.0.0 (Linux; Android 12)');
-      await np.setProperty('audio-channels', 'stereo');
-      await np.setProperty('audio-normalize-downmix', 'yes');
-      if (useHwAcc) {
-        if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
-          await np.setProperty('hwdec', 'mediacodec-copy');
-          await np.setProperty('vo', 'gpu');
-          await np.setProperty('framedrop', 'vo');
-        } else if (!kIsWeb && defaultTargetPlatform == TargetPlatform.macOS) {
-          await np.setProperty('hwdec', 'auto-safe');
+    if (np != null && !kIsWeb) {
+      try {
+        await np.setProperty('user-agent', 'IPTVSmartersPro/1.0.0 (Linux; Android 12)');
+        await np.setProperty('http-header-fields', 'User-Agent: IPTVSmartersPro/1.0.0 (Linux; Android 12)');
+        await np.setProperty('audio-channels', 'stereo');
+        await np.setProperty('audio-normalize-downmix', 'yes');
+        if (useHwAcc) {
+          if (defaultTargetPlatform == TargetPlatform.android) {
+            await np.setProperty('hwdec', 'mediacodec-copy');
+          } else if (defaultTargetPlatform == TargetPlatform.macOS) {
+            await np.setProperty('hwdec', 'auto-safe');
+          }
+        } else {
+          await np.setProperty('hwdec', 'no');
         }
-      } else {
-        await np.setProperty('hwdec', 'no');
-      }
+      } catch (_) {}
     }
 
     _listenStreams();
@@ -377,7 +369,7 @@ class _VodPlayerScreenState extends ConsumerState<VodPlayerScreen> {
     _overlayTimer?.cancel();
     _countdownTimer?.cancel();
     _saveCurrentProgress();
-    _player.dispose();
+    _player.stop();
     super.dispose();
   }
 

@@ -110,8 +110,6 @@ class PlayerService {
         if (hwAcc) {
           if (defaultTargetPlatform == TargetPlatform.android) {
             await np.setProperty('hwdec', 'mediacodec-copy');
-            await np.setProperty('vo', 'gpu');
-            await np.setProperty('framedrop', 'vo');
           } else {
             await np.setProperty('hwdec', 'auto-safe');
           }
@@ -133,8 +131,6 @@ class PlayerService {
         if (enabled) {
           if (defaultTargetPlatform == TargetPlatform.android) {
             await np.setProperty('hwdec', 'mediacodec-copy');
-            await np.setProperty('vo', 'gpu');
-            await np.setProperty('framedrop', 'vo');
           } else {
             await np.setProperty('hwdec', 'auto-safe');
           }
