@@ -1,14 +1,16 @@
 {
-  "id": "com.yesxtream.tv",
+  "id": "com.yesxtream.player",
   "version": "0.4.0",
   "vendor": "YesXtream",
   "type": "web",
   "main": "index.html",
   "title": "YesXtream",
-  "icon": "favicon.png",
-  "largeIcon": "favicon.png",
+  "icon": "icon.png",
+  "largeIcon": "largeIcon.png",
+  "iconColor": "#6C5CE7",
   "resolution": "1920x1080",
   "handlesRelaunch": true,
+  "requiredACG": [],
   "requiredPermissions": [
     "internet"
   ],

@@ -1,4 +1,4 @@
-import 'dart:io' show Platform;
+import '../../core/platform_info.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -50,7 +50,7 @@ class _ShowsScreenState extends ConsumerState<ShowsScreen> {
       backgroundColor: const Color(0xFF0A0A1A),
       body: KeyboardListener(
         focusNode: _keyboardFocusNode,
-        autofocus: !Platform.isAndroid,
+        autofocus: !PlatformInfo.isAndroid,
         onKeyEvent: _handleKeyEvent,
         child: Column(
           children: [
@@ -79,7 +79,7 @@ class _ShowsScreenState extends ConsumerState<ShowsScreen> {
         },
       },
       child: Focus(
-        autofocus: !Platform.isAndroid,
+        autofocus: !PlatformInfo.isAndroid,
         child: Scaffold(
       backgroundColor: const Color(0xFF0A0A1A),
       body: Center(
@@ -203,7 +203,7 @@ class _ShowsScreenState extends ConsumerState<ShowsScreen> {
             return Padding(
               padding: const EdgeInsets.symmetric(horizontal: 4),
               child: ChoiceChip(
-                autofocus: Platform.isAndroid && selected,
+                autofocus: PlatformInfo.isAndroid && selected,
                 label: Text(_categories[index]),
                 selected: selected,
                 selectedColor: const Color(0xFF6C5CE7),

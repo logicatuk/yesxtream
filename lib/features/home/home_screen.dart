@@ -1,10 +1,12 @@
-import 'dart:io' show Platform, exit;
+import 'dart:io' as io show exit;
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
+import '../../core/platform_info.dart';
 import '../../data/datasources/local/database.dart' as db;
 import '../../data/services/app_settings.dart';
 import '../playlists/playlist_providers.dart';
@@ -1107,10 +1109,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     child: FilledButton(
                       onPressed: () {
                         Navigator.of(ctx).pop();
-                        if (Platform.isAndroid || Platform.isIOS) {
+                        if (kIsWeb) {
+                          // On web/Smart TV browser, close or ignore
+                        } else if (PlatformInfo.isAndroid || PlatformInfo.isIOS) {
                           SystemNavigator.pop();
                         } else {
-                          exit(0);
+                          io.exit(0);
                         }
                       },
                       style: FilledButton.styleFrom(

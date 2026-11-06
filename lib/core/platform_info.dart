@@ -1,5 +1,3 @@
-import 'dart:io' show Platform;
-
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 
@@ -23,14 +21,18 @@ class PlatformInfo {
     return _detectedAsTV;
   }
 
+  static bool get isAndroid => !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
+  static bool get isIOS => !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS;
+  static bool get isMacOS => !kIsWeb && defaultTargetPlatform == TargetPlatform.macOS;
+  static bool get isWindows => !kIsWeb && defaultTargetPlatform == TargetPlatform.windows;
+  static bool get isLinux => !kIsWeb && defaultTargetPlatform == TargetPlatform.linux;
+
   static bool get isMobile {
-    if (kIsWeb) return false;
-    return (Platform.isAndroid || Platform.isIOS) && !isTV;
+    return (isAndroid || isIOS) && !isTV;
   }
 
   static bool get isDesktop {
-    if (kIsWeb) return false;
-    return Platform.isMacOS || Platform.isLinux || Platform.isWindows;
+    return isMacOS || isLinux || isWindows;
   }
 
   /// Cached TV detection result (set after first MediaQuery access).
@@ -52,7 +54,7 @@ class PlatformInfo {
       return;
     }
 
-    if (Platform.isAndroid) {
+    if (isAndroid) {
       _detectedAsTV = hasDirectionalNav || (isTvScreen && data.devicePixelRatio < 2.0);
     }
   }

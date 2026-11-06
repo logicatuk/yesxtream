@@ -12,7 +12,7 @@ class PipService {
   bool get isInPip => isInPipNotifier.value;
 
   PipService() {
-    if (Platform.isAndroid) {
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
       _channel.setMethodCallHandler((call) async {
         if (call.method == 'onPipModeChanged') {
           final inPip = call.arguments as bool? ?? false;
@@ -24,7 +24,7 @@ class PipService {
 
   /// Checks if Picture-in-Picture is supported on the current Android device.
   Future<bool> isPipSupported() async {
-    if (!Platform.isAndroid) return false;
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return false;
     try {
       final supported = await _channel.invokeMethod<bool>('isPipSupported');
       return supported ?? false;
@@ -35,7 +35,7 @@ class PipService {
 
   /// Enters Picture-in-Picture floating mode with the given aspect ratio.
   Future<bool> enterPip({int aspectNumerator = 16, int aspectDenominator = 9}) async {
-    if (!Platform.isAndroid) return false;
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return false;
     try {
       final success = await _channel.invokeMethod<bool>('enterPip', {
         'aspectNumerator': aspectNumerator,
@@ -52,7 +52,7 @@ class PipService {
 
   /// Refreshes whether the app is currently in PiP mode.
   Future<bool> checkInPip() async {
-    if (!Platform.isAndroid) return false;
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return false;
     try {
       final inPip = await _channel.invokeMethod<bool>('isInPip');
       final val = inPip ?? false;

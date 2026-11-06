@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io' show Platform;
+import '../../core/platform_info.dart';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -421,7 +421,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     if (event is! KeyDownEvent) return KeyEventResult.ignored;
 
     final key = event.logicalKey;
-    final isAndroid = Platform.isAndroid;
+    final isAndroid = PlatformInfo.isAndroid;
 
     // Numerical channel jumping via remote number keys (e.g. 1 0 5 -> jump to channel 105)
     final digit = _getDigitFromKey(key);
@@ -833,7 +833,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   Future<void> _takeScreenshot() async {
     final ps = ref.read(playerServiceProvider);
     try {
-      final dir = Platform.isMacOS || Platform.isLinux || Platform.isWindows
+      final dir = PlatformInfo.isDesktop
           ? (await getDownloadsDirectory()) ?? await getTemporaryDirectory()
           : await getTemporaryDirectory();
       final path = '${dir.path}/clubtivi_screenshot_${DateTime.now().millisecondsSinceEpoch}.png';

@@ -99,7 +99,7 @@ class AppUpdateService {
         },
       );
 
-      if (Platform.isAndroid) {
+      if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
         await _channel.invokeMethod('installApk', {'filePath': filePath});
       }
     } catch (e) {

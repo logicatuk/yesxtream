@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
+
 import 'package:archive/archive.dart';
 import 'package:logger/logger.dart';
 import 'package:path/path.dart' as p;
@@ -64,7 +66,7 @@ class BackupService {
       'version': 1,
       'app': 'clubTivi',
       'created': DateTime.now().toIso8601String(),
-      'platform': Platform.operatingSystem,
+      'platform': kIsWeb ? 'web' : Platform.operatingSystem,
     }));
     archive.addFile(ArchiveFile('meta.json', meta.length, meta));
 

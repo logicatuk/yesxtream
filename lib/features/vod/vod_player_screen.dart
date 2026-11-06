@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'dart:io' show Platform;
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -137,11 +137,11 @@ class _VodPlayerScreenState extends ConsumerState<VodPlayerScreen> {
       await np.setProperty('audio-channels', 'stereo');
       await np.setProperty('audio-normalize-downmix', 'yes');
       if (useHwAcc) {
-        if (Platform.isAndroid) {
+        if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
           await np.setProperty('hwdec', 'mediacodec-copy');
           await np.setProperty('vo', 'gpu');
           await np.setProperty('framedrop', 'vo');
-        } else if (Platform.isMacOS) {
+        } else if (!kIsWeb && defaultTargetPlatform == TargetPlatform.macOS) {
           await np.setProperty('hwdec', 'auto-safe');
         }
       } else {

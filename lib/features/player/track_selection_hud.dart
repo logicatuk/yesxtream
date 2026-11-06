@@ -1,9 +1,8 @@
-import 'dart:io' show Platform;
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:media_kit/media_kit.dart';
-import 'package:media_kit/src/player/native/player/real.dart' as native_player;
 
 import '../../data/services/app_settings.dart';
 import '../../data/services/pip_service.dart';
@@ -36,7 +35,7 @@ class TrackSelectionHud extends ConsumerStatefulWidget {
     Function(String ratio)? onAspectRatioChanged,
     String currentAspectRatio = 'Auto',
   }) {
-    final isTv = Platform.isAndroid && MediaQuery.of(context).size.width > 900;
+    final isTv = MediaQuery.of(context).size.width > 900;
     if (isTv) {
       return showDialog<void>(
         context: context,
@@ -112,34 +111,36 @@ class _TrackSelectionHudState extends ConsumerState<TrackSelectionHud>
           (s) => s.copyWith(bufferMode: mode),
         );
 
-    final np = widget.player.platform;
-    if (np is native_player.NativePlayer) {
-      switch (mode) {
-        case 'low_latency':
-          await np.setProperty('demuxer-readahead-secs', '2');
-          await np.setProperty('cache-secs', '5');
-          await np.setProperty('demuxer-max-bytes', '64M');
-          await np.setProperty('demuxer-max-back-bytes', '16M');
-          await np.setProperty('cache-pause', 'no');
-          await np.setProperty('cache-pause-initial', 'no');
-          await np.setProperty('cache-pause-wait', '0');
-          break;
-        case 'ultra':
-          await np.setProperty('demuxer-readahead-secs', '180');
-          await np.setProperty('cache-secs', '600');
-          await np.setProperty('demuxer-max-bytes', '1500M');
-          await np.setProperty('demuxer-max-back-bytes', '300M');
-          await np.setProperty('cache-pause', 'no');
-          break;
-        case 'standard':
-        default:
-          await np.setProperty('demuxer-readahead-secs', '60');
-          await np.setProperty('cache-secs', '180');
-          await np.setProperty('demuxer-max-bytes', '400M');
-          await np.setProperty('demuxer-max-back-bytes', '100M');
-          await np.setProperty('cache-pause', 'no');
-          break;
-      }
+    if (!kIsWeb) {
+      try {
+        final np = widget.player.platform as dynamic;
+        switch (mode) {
+          case 'low_latency':
+            await np.setProperty('demuxer-readahead-secs', '2');
+            await np.setProperty('cache-secs', '5');
+            await np.setProperty('demuxer-max-bytes', '64M');
+            await np.setProperty('demuxer-max-back-bytes', '16M');
+            await np.setProperty('cache-pause', 'no');
+            await np.setProperty('cache-pause-initial', 'no');
+            await np.setProperty('cache-pause-wait', '0');
+            break;
+          case 'ultra':
+            await np.setProperty('demuxer-readahead-secs', '180');
+            await np.setProperty('cache-secs', '600');
+            await np.setProperty('demuxer-max-bytes', '1500M');
+            await np.setProperty('demuxer-max-back-bytes', '300M');
+            await np.setProperty('cache-pause', 'no');
+            break;
+          case 'standard':
+          default:
+            await np.setProperty('demuxer-readahead-secs', '60');
+            await np.setProperty('cache-secs', '180');
+            await np.setProperty('demuxer-max-bytes', '400M');
+            await np.setProperty('demuxer-max-back-bytes', '100M');
+            await np.setProperty('cache-pause', 'no');
+            break;
+        }
+      } catch (_) {}
     }
     if (mounted) setState(() {});
   }

@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
-import 'package:media_kit/src/player/native/player/real.dart' as native_player;
+import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'player_service.dart';
@@ -175,11 +175,10 @@ class AdaptiveBufferManager {
   }
 
   Future<void> _setMpvProperty(PlayerService ps, String key, String value) async {
+    if (kIsWeb) return;
     try {
-      final np = ps.player.platform;
-      if (np is native_player.NativePlayer) {
-        await np.setProperty(key, value);
-      }
+      final np = ps.player.platform as dynamic;
+      await np.setProperty(key, value);
     } catch (_) {
       // Property might not be settable mid-stream — that's OK
     }

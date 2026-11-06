@@ -1,8 +1,5 @@
-import 'dart:io';
 import 'package:drift/drift.dart';
-import 'package:drift/native.dart';
-import 'package:path_provider/path_provider.dart';
-import 'package:path/path.dart' as p;
+import 'package:drift_flutter/drift_flutter.dart';
 import 'package:uuid/uuid.dart';
 
 import 'tables.dart';
@@ -565,23 +562,14 @@ class AppDatabase extends _$AppDatabase {
           .go();
 }
 
-LazyDatabase _openConnection() {
-  return LazyDatabase(() async {
-    final dir = await getApplicationSupportDirectory();
-    final file = File(p.join(dir.path, 'clubtivi', 'clubtivi.db'));
-    await file.parent.create(recursive: true);
-
-    // Migrate from old ~/Documents location if the new DB doesn't exist yet.
-    if (!await file.exists()) {
-      final oldDir = await getApplicationDocumentsDirectory();
-      final oldFile = File(p.join(oldDir.path, 'clubtivi', 'clubtivi.db'));
-      if (await oldFile.exists()) {
-        await oldFile.copy(file.path);
-      }
-    }
-
-    return NativeDatabase.createInBackground(file);
-  });
+QueryExecutor _openConnection() {
+  return driftDatabase(
+    name: 'clubtivi',
+    web: DriftWebOptions(
+      sqlite3Wasm: Uri.parse('sqlite3.wasm'),
+      driftWorker: Uri.parse('drift_worker.js'),
+    ),
+  );
 }
 
 /// Lightweight struct for failover group membership lookups.

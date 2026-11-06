@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io' show Directory, File, FileMode, Platform;
+import 'dart:io' show Directory, File, FileMode;
 
 import 'package:drift/drift.dart' show Value;
 import 'package:file_picker/file_picker.dart';
@@ -529,7 +529,7 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
 
   void _startTopBarFade() {
     _topBarTimer?.cancel();
-    if (_mouseInTopBar || Platform.isAndroid) return;
+    if (_mouseInTopBar || PlatformInfo.isAndroid) return;
     _topBarTimer = Timer(const Duration(seconds: 3), () {
       if (mounted && !_mouseInTopBar) setState(() => _topBarOpacity = 0.0);
     });
@@ -1329,7 +1329,7 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
   KeyEventResult _handleKeyEvent(KeyEvent event) {
     // On Android/TV, arrow keys are used for D-pad focus navigation.
     // Channel switching uses dedicated channelUp/channelDown keys.
-    final isAndroid = Platform.isAndroid;
+    final isAndroid = PlatformInfo.isAndroid;
 
     // Open debug info dialog with 'D' key
     if (!isAndroid && event.logicalKey == LogicalKeyboardKey.keyD) {
@@ -1534,8 +1534,8 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
         policy: ReadingOrderTraversalPolicy(),
         child: Focus(
           focusNode: _focusNode,
-          autofocus: !Platform.isAndroid,
-          skipTraversal: Platform.isAndroid,
+          autofocus: !PlatformInfo.isAndroid,
+          skipTraversal: PlatformInfo.isAndroid,
           onKeyEvent: (node, event) {
             if (event is! KeyDownEvent) return KeyEventResult.ignored;
             if (_searchFocusNode.hasFocus) return KeyEventResult.ignored;
@@ -1650,7 +1650,7 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
       body: SafeArea(
         child: Column(
           children: [
-            if (!Platform.isAndroid) _buildTopBar(context),
+            if (!PlatformInfo.isAndroid) _buildTopBar(context),
             const Expanded(
               child: Center(
                 child: Column(
@@ -2529,7 +2529,7 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
                               SizedBox(
                                 height: 28, width: 28,
                                 child: ExcludeFocus(
-                                  excluding: Platform.isAndroid,
+                                  excluding: PlatformInfo.isAndroid,
                                   child: IconButton(
                                     onPressed: () {
                                       if (_previewChannel == null) return;
@@ -2551,7 +2551,7 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
                               SizedBox(
                                 height: 28, width: 28,
                                 child: ExcludeFocus(
-                                  excluding: Platform.isAndroid,
+                                  excluding: PlatformInfo.isAndroid,
                                   child: IconButton(
                                     onPressed: () => _goFullscreen(_previewChannel!),
                                     icon: const Icon(Icons.fullscreen_rounded, size: 16),
@@ -3206,7 +3206,7 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
       onSecondaryTap: onSecondaryTap,
       child: Focus(
         focusNode: focusNode,
-        autofocus: isSelected && Platform.isAndroid,
+        autofocus: isSelected && PlatformInfo.isAndroid,
         onKeyEvent: (node, event) {
           if (event is! KeyDownEvent) return KeyEventResult.ignored;
           if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
@@ -3370,9 +3370,9 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
             onSecondaryTapUp: (_) => _showFavoriteListSheet(channel),
             child: Focus(
               focusNode: index == 0 ? _firstChannelFocusNode : null,
-              autofocus: index == 0 && Platform.isAndroid,
+              autofocus: index == 0 && PlatformInfo.isAndroid,
               onFocusChange: (hasFocus) {
-                if (hasFocus && Platform.isAndroid) _selectChannel(index);
+                if (hasFocus && PlatformInfo.isAndroid) _selectChannel(index);
               },
               onKeyEvent: (node, event) {
                 final key = event.logicalKey;
@@ -3380,7 +3380,7 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
                     key == LogicalKeyboardKey.enter ||
                     key == LogicalKeyboardKey.gameButtonA;
 
-                if (Platform.isAndroid && isCenterKey) {
+                if (PlatformInfo.isAndroid && isCenterKey) {
                   if (event is KeyDownEvent) {
                     _longPressChannelId = channel.id;
                     _longPressTimer?.cancel();
@@ -3948,7 +3948,7 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
             ),
           if (_failoverGroups.isNotEmpty) const SizedBox(width: 8),
           Focus(
-            autofocus: Platform.isAndroid,
+            autofocus: PlatformInfo.isAndroid,
             child: Builder(
               builder: (ctx) {
                 final focused = Focus.of(ctx).hasFocus;
@@ -5279,9 +5279,9 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
                         final isSelected = index == _selectedIndex;
                         return Focus(
                           focusNode: index == 0 ? _firstChannelFocusNode : null,
-                          autofocus: index == 0 && Platform.isAndroid,
+                          autofocus: index == 0 && PlatformInfo.isAndroid,
                           onFocusChange: (hasFocus) {
-                            if (hasFocus && Platform.isAndroid) _selectChannel(index);
+                            if (hasFocus && PlatformInfo.isAndroid) _selectChannel(index);
                           },
                           onKeyEvent: (node, event) {
                             final key = event.logicalKey;
@@ -5290,7 +5290,7 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
                                 key == LogicalKeyboardKey.gameButtonA;
 
                             // Long-press CENTER on TV remote → enter/toggle multi-select
-                            if (Platform.isAndroid && isCenterKey) {
+                            if (PlatformInfo.isAndroid && isCenterKey) {
                               if (event is KeyDownEvent) {
                                 _longPressChannelId = channel.id;
                                 _longPressTimer?.cancel();
@@ -5432,7 +5432,7 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
                             channel, details.globalPosition,
                           ),
                           onLongPress: _multiSelectMode ? null : () {
-                            if (Platform.isAndroid) {
+                            if (PlatformInfo.isAndroid) {
                               setState(() {
                                 _multiSelectMode = true;
                                 _multiSelectedChannelIds = {channel.id};
