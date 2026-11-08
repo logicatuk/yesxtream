@@ -165,6 +165,30 @@ class XtreamClient {
     }).toList();
   }
 
+  /// Get set of stream IDs (as strings) that have server-side archive enabled (tv_archive == 1).
+  Future<Set<String>> getArchiveStreamIds() async {
+    try {
+      final params = {..._authParams, 'action': 'get_live_streams'};
+      final response = await _dio.get(_apiBase, queryParameters: params);
+      if (response.data is! List) return {};
+      final ids = <String>{};
+      for (final item in (response.data as List)) {
+        if (item is Map<String, dynamic>) {
+          final arch = item['tv_archive'];
+          if (arch == 1 || arch == '1' || arch == true) {
+            final sid = item['stream_id']?.toString();
+            if (sid != null && sid.isNotEmpty) {
+              ids.add(sid);
+            }
+          }
+        }
+      }
+      return ids;
+    } catch (_) {
+      return {};
+    }
+  }
+
   /// Get VOD categories.
   Future<List<XtreamCategory>> getVodCategories() async {
     final response = await _dio.get(

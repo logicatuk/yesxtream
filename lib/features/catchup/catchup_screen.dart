@@ -10,8 +10,8 @@ import '../playlists/playlist_providers.dart';
 import '../providers/provider_manager.dart';
 
 /// Dedicated Catch-up (TV Archive / Replay) Screen.
-/// Filters and displays ONLY channels that have EPG / Catch-up availability,
-/// with a 7-day past broadcast selector and 1-tap playback.
+/// Filters and displays ONLY channels that actually support Catch-up / TV Archive,
+/// with instant day-switching, smooth 60fps scrolling, and 1-tap replay playback.
 class CatchupScreen extends ConsumerStatefulWidget {
   final db.Channel? initialChannel;
   const CatchupScreen({super.key, this.initialChannel});
@@ -26,10 +26,35 @@ class _CatchupScreenState extends ConsumerState<CatchupScreen> {
   int _selectedDayOffset = 0; // 0 = Today, 1 = Yesterday, 2 = 2 days ago, etc.
   final TextEditingController _searchController = TextEditingController();
 
+  // Channels state
+  bool _isLoadingChannels = true;
+  String? _currentLoadedProviderId;
+  List<db.Channel> _allCatchupChannels = [];
+  List<db.Channel> _filteredChannels = [];
+
+  // Programmes state & in-memory cache
+  bool _isLoadingProgrammes = false;
+  List<db.EpgProgramme> _currentProgrammes = [];
+  final Map<String, List<db.EpgProgramme>> _programmesCache = {};
+
+  // Static cache of archive-supported stream IDs per provider to avoid repeated network calls
+  static final Map<String, Set<String>> _providerArchiveStreamIds = {};
+
   @override
   void initState() {
     super.initState();
     _selectedChannel = widget.initialChannel;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _loadChannels();
+    });
+  }
+
+  @override
+  void didUpdateWidget(CatchupScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.initialChannel != oldWidget.initialChannel && widget.initialChannel != null) {
+      _selectChannel(widget.initialChannel!);
+    }
   }
 
   @override
@@ -38,10 +63,211 @@ class _CatchupScreenState extends ConsumerState<CatchupScreen> {
     super.dispose();
   }
 
+  void _checkProviderChange(String? activePlaylistId) {
+    if (activePlaylistId != null && activePlaylistId != _currentLoadedProviderId) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _loadChannels();
+      });
+    }
+  }
+
+  /// Load ONLY genuine catch-up channels for the active provider.
+  Future<void> _loadChannels() async {
+    final activePlaylist = ref.read(activePlaylistProvider);
+    if (activePlaylist == null) {
+      if (mounted) {
+        setState(() {
+          _isLoadingChannels = false;
+          _allCatchupChannels = [];
+          _filteredChannels = [];
+        });
+      }
+      return;
+    }
+
+    final providerId = activePlaylist.id;
+    _currentLoadedProviderId = providerId;
+
+    if (mounted) {
+      setState(() => _isLoadingChannels = true);
+    }
+
+    final database = ref.read(databaseProvider);
+    final allChannels = await database.getChannelsForProvider(providerId);
+    final liveChannels = allChannels.where((c) => c.streamType == 'live').toList();
+
+    // Check provider info
+    final provider = await (database.select(database.providers)
+          ..where((t) => t.id.equals(providerId)))
+        .getSingleOrNull();
+
+    Set<String> archiveStreamIds = {};
+
+    // 1. Resolve Xtream credentials if available
+    String? baseUrl;
+    String? username;
+    String? password;
+
+    if (provider != null && provider.type == 'xtream' && provider.url != null) {
+      baseUrl = provider.url;
+      username = provider.username;
+      password = provider.password;
+    } else if (provider?.url != null) {
+      final parsed = parseXtreamFromM3uUrl(provider!.url!);
+      if (parsed != null) {
+        baseUrl = parsed.baseUrl;
+        username = parsed.username;
+        password = parsed.password;
+      }
+    }
+
+    // 2. If Xtream is available, check / cache real tv_archive stream IDs
+    if (baseUrl != null && username != null && password != null) {
+      if (_providerArchiveStreamIds.containsKey(providerId)) {
+        archiveStreamIds = _providerArchiveStreamIds[providerId]!;
+      } else {
+        try {
+          final client = XtreamClient(
+            baseUrl: baseUrl,
+            username: username,
+            password: password,
+          );
+          archiveStreamIds = await client.getArchiveStreamIds();
+          client.dispose();
+          _providerArchiveStreamIds[providerId] = archiveStreamIds;
+        } catch (_) {}
+      }
+    }
+
+    // 3. Filter channels that genuinely support Catch-up
+    final catchupChannels = liveChannels.where((c) {
+      final streamId = c.id.contains('_') ? c.id.split('_').last : c.id;
+
+      // Exact match with server tv_archive flag
+      if (archiveStreamIds.isNotEmpty &&
+          (archiveStreamIds.contains(streamId) || archiveStreamIds.contains(c.id))) {
+        return true;
+      }
+
+      // Check name tags indicating catchup/archive
+      final nameLower = c.name.toLowerCase();
+      if (nameLower.contains('[archive]') ||
+          nameLower.contains('(archive)') ||
+          nameLower.contains('[catchup]') ||
+          nameLower.contains('(catchup)') ||
+          nameLower.contains('[replay]') ||
+          nameLower.contains('(replay)') ||
+          nameLower.contains(' catchup') ||
+          nameLower.contains(' replay')) {
+        return true;
+      }
+
+      // Check stream URL or group title
+      if (c.streamUrl.contains('/timeshift/')) return true;
+      final groupLower = c.groupTitle?.toLowerCase() ?? '';
+      if (groupLower.contains('catchup') ||
+          groupLower.contains('archive') ||
+          groupLower.contains('replay')) {
+        return true;
+      }
+
+      return false;
+    }).toList();
+
+    // If an initial channel was passed, ensure it is available in the list
+    if (widget.initialChannel != null &&
+        !catchupChannels.any((c) => c.id == widget.initialChannel!.id)) {
+      catchupChannels.insert(0, widget.initialChannel!);
+    }
+
+    if (!mounted) return;
+
+    db.Channel? nextSelected = _selectedChannel;
+    if (nextSelected == null || !catchupChannels.any((c) => c.id == nextSelected!.id)) {
+      nextSelected = catchupChannels.isNotEmpty ? catchupChannels.first : null;
+    }
+
+    setState(() {
+      _allCatchupChannels = catchupChannels;
+      _applySearchFilter();
+      _selectedChannel = nextSelected;
+      _isLoadingChannels = false;
+    });
+
+    if (nextSelected != null) {
+      _loadProgrammesForChannel(nextSelected);
+    }
+  }
+
+  void _onSearchChanged(String val) {
+    setState(() {
+      _searchQuery = val;
+      _applySearchFilter();
+    });
+  }
+
+  void _applySearchFilter() {
+    if (_searchQuery.trim().isEmpty) {
+      _filteredChannels = List.from(_allCatchupChannels);
+    } else {
+      final q = _searchQuery.toLowerCase().trim();
+      _filteredChannels = _allCatchupChannels.where((c) {
+        return c.name.toLowerCase().contains(q) ||
+            (c.groupTitle?.toLowerCase().contains(q) ?? false);
+      }).toList();
+    }
+  }
+
+  void _selectChannel(db.Channel ch) {
+    if (_selectedChannel?.id == ch.id) return;
+    setState(() => _selectedChannel = ch);
+    _loadProgrammesForChannel(ch);
+  }
+
+  void _selectDay(int dayOffset) {
+    if (_selectedDayOffset == dayOffset) return;
+    setState(() => _selectedDayOffset = dayOffset);
+    if (_selectedChannel != null) {
+      _loadProgrammesForChannel(_selectedChannel!);
+    }
+  }
+
+  /// Load programmes for the selected channel and day offset, using in-memory cache when possible.
+  Future<void> _loadProgrammesForChannel(db.Channel channel) async {
+    final cacheKey = '${channel.id}_$_selectedDayOffset';
+
+    if (_programmesCache.containsKey(cacheKey)) {
+      if (mounted) {
+        setState(() {
+          _currentProgrammes = _programmesCache[cacheKey]!;
+          _isLoadingProgrammes = false;
+        });
+      }
+      return;
+    }
+
+    if (mounted) {
+      setState(() => _isLoadingProgrammes = true);
+    }
+
+    final targetDate = DateTime.now().subtract(Duration(days: _selectedDayOffset));
+    final database = ref.read(databaseProvider);
+    final progs = await _fetchDayProgrammes(database, channel, targetDate);
+
+    _programmesCache[cacheKey] = progs;
+
+    if (mounted && _selectedChannel?.id == channel.id) {
+      setState(() {
+        _currentProgrammes = progs;
+        _isLoadingProgrammes = false;
+      });
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final activePlaylist = ref.watch(activePlaylistProvider);
-    final database = ref.watch(databaseProvider);
+    _checkProviderChange(activePlaylist?.id);
 
     if (activePlaylist == null) {
       return const Scaffold(
@@ -55,235 +281,252 @@ class _CatchupScreenState extends ConsumerState<CatchupScreen> {
       );
     }
 
-    return Scaffold(
-      backgroundColor: const Color(0xFF0A0A0F),
-      body: FutureBuilder<List<db.Channel>>(
-        future: _fetchCatchupChannels(database, activePlaylist.id),
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(
-              child: CircularProgressIndicator(color: Color(0xFF6C5CE7)),
-            );
-          }
-
-          final allCatchupChannels = snapshot.data ?? [];
-
-          // Filter by search query
-          final filteredChannels = _searchQuery.isEmpty
-              ? allCatchupChannels
-              : allCatchupChannels
-                  .where((c) =>
-                      c.name.toLowerCase().contains(_searchQuery.toLowerCase()) ||
-                      (c.groupTitle?.toLowerCase().contains(_searchQuery.toLowerCase()) ?? false))
-                  .toList();
-
-          // Auto-select first channel if none selected
-          if (_selectedChannel == null && filteredChannels.isNotEmpty) {
-            _selectedChannel = filteredChannels.first;
-          } else if (_selectedChannel != null &&
-              !filteredChannels.any((c) => c.id == _selectedChannel!.id)) {
-            _selectedChannel = filteredChannels.isNotEmpty ? filteredChannels.first : null;
-          }
-
-          return Row(
+    if (_isLoadingChannels) {
+      return const Scaffold(
+        backgroundColor: Color(0xFF0A0A0F),
+        body: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
             children: [
-              // ── Left Column: Channel List (ONLY Catch-up channels) ──
-              SizedBox(
-                width: 380,
-                child: Container(
-                  decoration: const BoxDecoration(
-                    color: Color(0xFF0E0D1A),
-                    border: Border(
-                      right: BorderSide(color: Color(0xFF1E1E2E), width: 1),
-                    ),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // Header & Counter
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(16, 16, 16, 10),
-                        child: Row(
-                          children: [
-                            Container(
-                              padding: const EdgeInsets.all(8),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFF6C5CE7).withValues(alpha: 0.2),
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              child: const Icon(
-                                Icons.replay_rounded,
-                                color: Color(0xFF6C5CE7),
-                                size: 20,
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  const Text(
-                                    'Catch-up Channels',
-                                    style: TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                  Text(
-                                    '${filteredChannels.length} available with replay',
-                                    style: const TextStyle(
-                                      color: Colors.white54,
-                                      fontSize: 12,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-
-                      // Search input
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-                        child: TextField(
-                          controller: _searchController,
-                          style: const TextStyle(color: Colors.white, fontSize: 13),
-                          decoration: InputDecoration(
-                            hintText: 'Search catch-up channels...',
-                            hintStyle: const TextStyle(color: Colors.white38, fontSize: 13),
-                            prefixIcon: const Icon(Icons.search, color: Colors.white38, size: 18),
-                            suffixIcon: _searchQuery.isNotEmpty
-                                ? IconButton(
-                                    icon: const Icon(Icons.clear, color: Colors.white38, size: 16),
-                                    onPressed: () {
-                                      _searchController.clear();
-                                      setState(() => _searchQuery = '');
-                                    },
-                                  )
-                                : null,
-                            filled: true,
-                            fillColor: const Color(0xFF181728),
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(8),
-                              borderSide: BorderSide.none,
-                            ),
-                            contentPadding: const EdgeInsets.symmetric(vertical: 8),
-                          ),
-                          onChanged: (val) => setState(() => _searchQuery = val),
-                        ),
-                      ),
-
-                      const Divider(color: Color(0xFF1E1E2E), height: 12),
-
-                      // Channels ListView
-                      Expanded(
-                        child: filteredChannels.isEmpty
-                            ? Center(
-                                child: Padding(
-                                  padding: const EdgeInsets.all(24),
-                                  child: Text(
-                                    _searchQuery.isEmpty
-                                        ? 'No catch-up channels found.\nMake sure your IPTV provider supports TV Archive.'
-                                        : 'No channels match "$_searchQuery"',
-                                    textAlign: TextAlign.center,
-                                    style: const TextStyle(color: Colors.white54, fontSize: 13),
-                                  ),
-                                ),
-                              )
-                            : ListView.separated(
-                                itemCount: filteredChannels.length,
-                                separatorBuilder: (_, _) =>
-                                    const Divider(color: Color(0xFF151424), height: 1),
-                                itemBuilder: (context, index) {
-                                  final ch = filteredChannels[index];
-                                  final isSelected = ch.id == _selectedChannel?.id;
-
-                                  return Material(
-                                    color: Colors.transparent,
-                                    child: ListTile(
-                                      dense: true,
-                                      selected: isSelected,
-                                      selectedTileColor:
-                                          const Color(0xFF6C5CE7).withValues(alpha: 0.18),
-                                      onTap: () => setState(() => _selectedChannel = ch),
-                                      leading: Container(
-                                        width: 36,
-                                        height: 36,
-                                        decoration: BoxDecoration(
-                                          color: const Color(0xFF181728),
-                                          borderRadius: BorderRadius.circular(6),
-                                        ),
-                                        child: ch.tvgLogo != null && ch.tvgLogo!.isNotEmpty
-                                            ? ClipRRect(
-                                                borderRadius: BorderRadius.circular(6),
-                                                child: CachedNetworkImage(
-                                                  imageUrl: ch.tvgLogo!,
-                                                  fit: BoxFit.contain,
-                                                  errorWidget: (_, _, _) => const Icon(
-                                                    Icons.live_tv_rounded,
-                                                    color: Colors.white38,
-                                                    size: 18,
-                                                  ),
-                                                ),
-                                              )
-                                            : const Icon(
-                                                Icons.live_tv_rounded,
-                                                color: Colors.white38,
-                                                size: 18,
-                                              ),
-                                      ),
-                                      title: Text(
-                                        ch.name,
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: TextStyle(
-                                          color: isSelected ? Colors.white : Colors.white70,
-                                          fontSize: 13,
-                                          fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
-                                        ),
-                                      ),
-                                      subtitle: ch.groupTitle != null
-                                          ? Text(
-                                              ch.groupTitle!,
-                                              maxLines: 1,
-                                              overflow: TextOverflow.ellipsis,
-                                              style: const TextStyle(
-                                                color: Colors.white38,
-                                                fontSize: 11,
-                                              ),
-                                            )
-                                          : null,
-                                      trailing: const Icon(
-                                        Icons.history_rounded,
-                                        color: Color(0xFF6C5CE7),
-                                        size: 16,
-                                      ),
-                                    ),
-                                  );
-                                },
-                              ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-
-              // ── Right Column: Past 7 Days Archive & Programmes ──
-              Expanded(
-                child: _selectedChannel == null
-                    ? const Center(
-                        child: Text(
-                          'Select a channel to browse its catch-up archive',
-                          style: TextStyle(color: Colors.white54),
-                        ),
-                      )
-                    : _buildChannelArchiveView(context, database, _selectedChannel!),
+              CircularProgressIndicator(color: Color(0xFF6C5CE7)),
+              SizedBox(height: 16),
+              Text(
+                'Scanning catch-up channels...',
+                style: TextStyle(color: Colors.white70, fontSize: 13),
               ),
             ],
-          );
-        },
+          ),
+        ),
+      );
+    }
+
+    return Scaffold(
+      backgroundColor: const Color(0xFF0A0A0F),
+      body: Row(
+        children: [
+          // ── Left Column: Channel List (ONLY Genuine Catch-up channels) ──
+          SizedBox(
+            width: 380,
+            child: Container(
+              decoration: const BoxDecoration(
+                color: Color(0xFF0E0D1A),
+                border: Border(
+                  right: BorderSide(color: Color(0xFF1E1E2E), width: 1),
+                ),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Header & Counter
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 10),
+                    child: Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF6C5CE7).withValues(alpha: 0.2),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: const Icon(
+                            Icons.replay_rounded,
+                            color: Color(0xFF6C5CE7),
+                            size: 20,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                'Catch-up Channels',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              Text(
+                                '${_filteredChannels.length} available with replay',
+                                style: const TextStyle(
+                                  color: Colors.white54,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  // Search input
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                    child: TextField(
+                      controller: _searchController,
+                      style: const TextStyle(color: Colors.white, fontSize: 13),
+                      decoration: InputDecoration(
+                        hintText: 'Search catch-up channels...',
+                        hintStyle: const TextStyle(color: Colors.white38, fontSize: 13),
+                        prefixIcon: const Icon(Icons.search, color: Colors.white38, size: 18),
+                        suffixIcon: _searchQuery.isNotEmpty
+                            ? IconButton(
+                                icon: const Icon(Icons.clear, color: Colors.white38, size: 16),
+                                onPressed: () {
+                                  _searchController.clear();
+                                  _onSearchChanged('');
+                                },
+                              )
+                            : null,
+                        filled: true,
+                        fillColor: const Color(0xFF181728),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: BorderSide.none,
+                        ),
+                        contentPadding: const EdgeInsets.symmetric(vertical: 8),
+                      ),
+                      onChanged: _onSearchChanged,
+                    ),
+                  ),
+
+                  const Divider(color: Color(0xFF1E1E2E), height: 12),
+
+                  // Channels Virtualized ListView
+                  Expanded(
+                    child: _filteredChannels.isEmpty
+                        ? Center(
+                            child: Padding(
+                              padding: const EdgeInsets.all(24),
+                              child: Text(
+                                _searchQuery.isEmpty
+                                    ? 'No catch-up channels found.\nMake sure your IPTV provider supports TV Archive.'
+                                    : 'No channels match "$_searchQuery"',
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(color: Colors.white54, fontSize: 13),
+                              ),
+                            ),
+                          )
+                        : ListView.builder(
+                            itemCount: _filteredChannels.length,
+                            itemExtent: 58.0, // Fixed height for 60fps virtualization
+                            itemBuilder: (context, index) {
+                              final ch = _filteredChannels[index];
+                              final isSelected = ch.id == _selectedChannel?.id;
+
+                              return Material(
+                                color: isSelected
+                                    ? const Color(0xFF6C5CE7).withValues(alpha: 0.18)
+                                    : Colors.transparent,
+                                child: InkWell(
+                                  onTap: () => _selectChannel(ch),
+                                  child: Container(
+                                    height: 58.0,
+                                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                                    decoration: const BoxDecoration(
+                                      border: Border(
+                                        bottom: BorderSide(color: Color(0xFF151424), width: 1),
+                                      ),
+                                    ),
+                                    child: Row(
+                                      children: [
+                                        // Channel Logo with memory caching
+                                        Container(
+                                          width: 36,
+                                          height: 36,
+                                          decoration: BoxDecoration(
+                                            color: const Color(0xFF181728),
+                                            borderRadius: BorderRadius.circular(6),
+                                          ),
+                                          child: ch.tvgLogo != null && ch.tvgLogo!.isNotEmpty
+                                              ? ClipRRect(
+                                                  borderRadius: BorderRadius.circular(6),
+                                                  child: CachedNetworkImage(
+                                                    imageUrl: ch.tvgLogo!,
+                                                    fit: BoxFit.contain,
+                                                    memCacheWidth: 72,
+                                                    memCacheHeight: 72,
+                                                    maxWidthDiskCache: 120,
+                                                    maxHeightDiskCache: 120,
+                                                    errorWidget: (_, _, _) => const Icon(
+                                                      Icons.live_tv_rounded,
+                                                      color: Colors.white38,
+                                                      size: 18,
+                                                    ),
+                                                  ),
+                                                )
+                                              : const Icon(
+                                                  Icons.live_tv_rounded,
+                                                  color: Colors.white38,
+                                                  size: 18,
+                                                ),
+                                        ),
+                                        const SizedBox(width: 12),
+
+                                        // Name and category
+                                        Expanded(
+                                          child: Column(
+                                            mainAxisAlignment: MainAxisAlignment.center,
+                                            crossAxisAlignment: CrossAxisAlignment.start,
+                                            children: [
+                                              Text(
+                                                ch.name,
+                                                maxLines: 1,
+                                                overflow: TextOverflow.ellipsis,
+                                                style: TextStyle(
+                                                  color: isSelected ? Colors.white : Colors.white70,
+                                                  fontSize: 13,
+                                                  fontWeight:
+                                                      isSelected ? FontWeight.bold : FontWeight.w500,
+                                                ),
+                                              ),
+                                              if (ch.groupTitle != null && ch.groupTitle!.isNotEmpty)
+                                                Text(
+                                                  ch.groupTitle!,
+                                                  maxLines: 1,
+                                                  overflow: TextOverflow.ellipsis,
+                                                  style: const TextStyle(
+                                                    color: Colors.white38,
+                                                    fontSize: 11,
+                                                  ),
+                                                ),
+                                            ],
+                                          ),
+                                        ),
+
+                                        // Replay indicator badge
+                                        const Icon(
+                                          Icons.history_rounded,
+                                          color: Color(0xFF6C5CE7),
+                                          size: 16,
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+          // ── Right Column: Past 7 Days Archive & Programmes ──
+          Expanded(
+            child: _selectedChannel == null
+                ? const Center(
+                    child: Text(
+                      'Select a channel to browse its catch-up archive',
+                      style: TextStyle(color: Colors.white54),
+                    ),
+                  )
+                : _buildChannelArchiveView(context, _selectedChannel!),
+          ),
+        ],
       ),
     );
   }
@@ -293,7 +536,6 @@ class _CatchupScreenState extends ConsumerState<CatchupScreen> {
   // ─────────────────────────────────────────────────────────────
   Widget _buildChannelArchiveView(
     BuildContext context,
-    db.AppDatabase database,
     db.Channel channel,
   ) {
     final targetDate = DateTime.now().subtract(Duration(days: _selectedDayOffset));
@@ -326,6 +568,10 @@ class _CatchupScreenState extends ConsumerState<CatchupScreen> {
                     child: CachedNetworkImage(
                       imageUrl: channel.tvgLogo!,
                       fit: BoxFit.contain,
+                      memCacheWidth: 96,
+                      memCacheHeight: 96,
+                      maxWidthDiskCache: 160,
+                      maxHeightDiskCache: 160,
                       errorWidget: (_, _, _) => const Icon(
                         Icons.live_tv_rounded,
                         color: Colors.white38,
@@ -395,7 +641,7 @@ class _CatchupScreenState extends ConsumerState<CatchupScreen> {
               }
 
               return InkWell(
-                onTap: () => setState(() => _selectedDayOffset = index),
+                onTap: () => _selectDay(index),
                 borderRadius: BorderRadius.circular(8),
                 child: Container(
                   padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
@@ -428,197 +674,152 @@ class _CatchupScreenState extends ConsumerState<CatchupScreen> {
 
         // ── Programme Listings for Selected Day ──
         Expanded(
-          child: FutureBuilder<List<db.EpgProgramme>>(
-            future: _fetchDayProgrammes(database, channel, targetDate),
-            builder: (context, snapshot) {
-              if (snapshot.connectionState == ConnectionState.waiting) {
-                return const Center(
+          child: _isLoadingProgrammes
+              ? const Center(
                   child: CircularProgressIndicator(color: Color(0xFF6C5CE7)),
-                );
-              }
-
-              final programmes = snapshot.data ?? [];
-
-              if (programmes.isEmpty) {
-                return Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const Icon(
-                        Icons.event_busy_rounded,
-                        color: Colors.white24,
-                        size: 48,
-                      ),
-                      const SizedBox(height: 12),
-                      Text(
-                        'No archive listings recorded for ${DateFormat('dd MMMM yyyy').format(targetDate)}.',
-                        style: const TextStyle(color: Colors.white54, fontSize: 14),
-                      ),
-                      const SizedBox(height: 6),
-                      const Text(
-                        'You can watch the live channel or try another date.',
-                        style: TextStyle(color: Colors.white38, fontSize: 12),
-                      ),
-                      const SizedBox(height: 18),
-                      OutlinedButton.icon(
-                        onPressed: () {
-                          context.push('/player', extra: {
-                            'streamUrl': channel.streamUrl,
-                            'channelName': channel.name,
-                            'channelLogo': channel.tvgLogo,
-                          });
-                        },
-                        icon: const Icon(Icons.play_arrow_rounded, size: 16),
-                        label: const Text('Play Live Stream'),
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: const Color(0xFF6C5CE7),
-                          side: const BorderSide(color: Color(0xFF6C5CE7)),
-                        ),
-                      ),
-                    ],
-                  ),
-                );
-              }
-
-              return ListView.separated(
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                itemCount: programmes.length,
-                separatorBuilder: (_, _) => const SizedBox(height: 8),
-                itemBuilder: (context, index) {
-                  final prog = programmes[index];
-                  final startTimeStr = DateFormat('HH:mm').format(prog.start);
-                  final stopTimeStr = DateFormat('HH:mm').format(prog.stop);
-                  final durationMin = prog.stop.difference(prog.start).inMinutes;
-
-                  return Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF131222),
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: const Color(0xFF22203A)),
-                    ),
-                    child: Row(
-                      children: [
-                        // Time column
-                        Container(
-                          width: 80,
-                          padding: const EdgeInsets.symmetric(vertical: 4),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                startTimeStr,
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                              Text(
-                                '$stopTimeStr ($durationMin m)',
-                                style: const TextStyle(
-                                  color: Colors.white38,
-                                  fontSize: 11,
-                                ),
-                              ),
-                            ],
+                )
+              : _currentProgrammes.isEmpty
+                  ? Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const Icon(
+                            Icons.event_busy_rounded,
+                            color: Colors.white24,
+                            size: 48,
                           ),
-                        ),
-
-                        const SizedBox(width: 14),
-
-                        // Title & description
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                prog.title,
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                              if (prog.description != null && prog.description!.isNotEmpty) ...[
-                                const SizedBox(height: 4),
-                                Text(
-                                  prog.description!,
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(
-                                    color: Colors.white54,
-                                    fontSize: 12,
-                                  ),
-                                ),
-                              ],
-                            ],
+                          const SizedBox(height: 12),
+                          Text(
+                            'No archive listings recorded for ${DateFormat('dd MMMM yyyy').format(targetDate)}.',
+                            style: const TextStyle(color: Colors.white54, fontSize: 14),
                           ),
-                        ),
-
-                        const SizedBox(width: 16),
-
-                        // Play Catchup Button
-                        FilledButton.icon(
-                          onPressed: () => _playCatchupProgramme(context, channel, prog),
-                          icon: const Icon(Icons.play_circle_fill_rounded, size: 18),
-                          label: const Text('REPLAY'),
-                          style: FilledButton.styleFrom(
-                            backgroundColor: const Color(0xFF6C5CE7),
-                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                            textStyle: const TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.bold,
-                              letterSpacing: 0.5,
+                          const SizedBox(height: 6),
+                          const Text(
+                            'You can watch the live channel or try another date.',
+                            style: TextStyle(color: Colors.white38, fontSize: 12),
+                          ),
+                          const SizedBox(height: 18),
+                          OutlinedButton.icon(
+                            onPressed: () {
+                              context.push('/player', extra: {
+                                'streamUrl': channel.streamUrl,
+                                'channelName': channel.name,
+                                'channelLogo': channel.tvgLogo,
+                              });
+                            },
+                            icon: const Icon(Icons.play_arrow_rounded, size: 16),
+                            label: const Text('Play Live Stream'),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: const Color(0xFF6C5CE7),
+                              side: const BorderSide(color: Color(0xFF6C5CE7)),
                             ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
+                    )
+                  : ListView.separated(
+                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                      itemCount: _currentProgrammes.length,
+                      separatorBuilder: (_, _) => const SizedBox(height: 8),
+                      itemBuilder: (context, index) {
+                        final prog = _currentProgrammes[index];
+                        final startTimeStr = DateFormat('HH:mm').format(prog.start);
+                        final stopTimeStr = DateFormat('HH:mm').format(prog.stop);
+                        final durationMin = prog.stop.difference(prog.start).inMinutes;
+
+                        return Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF131222),
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: const Color(0xFF22203A)),
+                          ),
+                          child: Row(
+                            children: [
+                              // Time column
+                              Container(
+                                width: 80,
+                                padding: const EdgeInsets.symmetric(vertical: 4),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      startTimeStr,
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                    Text(
+                                      '$stopTimeStr ($durationMin m)',
+                                      style: const TextStyle(
+                                        color: Colors.white38,
+                                        fontSize: 11,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+
+                              const SizedBox(width: 14),
+
+                              // Title & description
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      prog.title,
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                    if (prog.description != null &&
+                                        prog.description!.isNotEmpty) ...[
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        prog.description!,
+                                        maxLines: 2,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(
+                                          color: Colors.white54,
+                                          fontSize: 12,
+                                        ),
+                                      ),
+                                    ],
+                                  ],
+                                ),
+                              ),
+
+                              const SizedBox(width: 16),
+
+                              // Play Catchup Button
+                              FilledButton.icon(
+                                onPressed: () => _playCatchupProgramme(context, channel, prog),
+                                icon: const Icon(Icons.play_circle_fill_rounded, size: 18),
+                                label: const Text('REPLAY'),
+                                style: FilledButton.styleFrom(
+                                  backgroundColor: const Color(0xFF6C5CE7),
+                                  padding:
+                                      const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                                  textStyle: const TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.bold,
+                                    letterSpacing: 0.5,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                      },
                     ),
-                  );
-                },
-              );
-            },
-          ),
         ),
       ],
     );
-  }
-
-  // ─────────────────────────────────────────────────────────────
-  // ── Query Channels with Catch-up Support
-  // ─────────────────────────────────────────────────────────────
-  Future<List<db.Channel>> _fetchCatchupChannels(
-    db.AppDatabase database,
-    String providerId,
-  ) async {
-    // 1. Get all channels for this provider
-    final allChannels = await database.getChannelsForProvider(providerId);
-    final liveChannels = allChannels.where((c) => c.streamType == 'live').toList();
-
-    // 2. Identify channels that have EPG mappings or programmes
-    final mappings = await database.getAllMappings();
-    final mappedChannelIds = mappings.map((m) => m.channelId).toSet();
-
-    // Channels with tvgId or EPG mappings or catchup indicators
-    final catchupChannels = liveChannels.where((c) {
-      if (mappedChannelIds.contains(c.id)) return true;
-      if (c.tvgId != null && c.tvgId!.isNotEmpty) return true;
-      final nameLower = c.name.toLowerCase();
-      if (nameLower.contains('[archive]') || nameLower.contains('(archive)') || nameLower.contains('catchup')) {
-        return true;
-      }
-      return false;
-    }).toList();
-
-    final result = catchupChannels.isNotEmpty ? catchupChannels : liveChannels.take(50).toList();
-
-    // If an initial channel was passed, ensure it is in the list and at the top
-    if (widget.initialChannel != null && !result.any((c) => c.id == widget.initialChannel!.id)) {
-      result.insert(0, widget.initialChannel!);
-    }
-
-    return result;
   }
 
   // ─────────────────────────────────────────────────────────────
@@ -633,10 +834,14 @@ class _CatchupScreenState extends ConsumerState<CatchupScreen> {
     final endOfDay = DateTime(targetDate.year, targetDate.month, targetDate.day, 23, 59, 59);
 
     String? epgId;
-    final mappings = await database.getAllMappings();
-    final match = mappings.where((m) => m.channelId == channel.id);
-    if (match.isNotEmpty) {
-      epgId = '${match.first.epgSourceId}_${match.first.epgChannelId}';
+
+    // Single-row mapping lookup instead of loading all mappings
+    final match = await (database.select(database.epgMappings)
+          ..where((t) => t.channelId.equals(channel.id)))
+        .getSingleOrNull();
+
+    if (match != null) {
+      epgId = '${match.epgSourceId}_${match.epgChannelId}';
     } else if (channel.tvgId != null && channel.tvgId!.isNotEmpty) {
       epgId = channel.tvgId;
     }
@@ -695,7 +900,11 @@ class _CatchupScreenState extends ConsumerState<CatchupScreen> {
         }
       }
 
-      if (baseUrl != null && username != null && password != null && streamId != null && streamId.isNotEmpty) {
+      if (baseUrl != null &&
+          username != null &&
+          password != null &&
+          streamId != null &&
+          streamId.isNotEmpty) {
         final client = XtreamClient(
           baseUrl: baseUrl,
           username: username,
@@ -713,15 +922,19 @@ class _CatchupScreenState extends ConsumerState<CatchupScreen> {
 
         final listToUse = filteredEntries.isNotEmpty ? filteredEntries : entries;
 
-        return listToUse.map((e) => db.EpgProgramme(
-          id: (e.start?.millisecondsSinceEpoch ?? DateTime.now().millisecondsSinceEpoch) % 2147483647,
-          epgChannelId: channel.id,
-          sourceId: channel.providerId,
-          title: e.title,
-          description: e.description,
-          start: e.start ?? DateTime.now().subtract(const Duration(hours: 1)),
-          stop: e.end ?? DateTime.now(),
-        )).toList();
+        return listToUse
+            .map((e) => db.EpgProgramme(
+                  id: (e.start?.millisecondsSinceEpoch ??
+                          DateTime.now().millisecondsSinceEpoch) %
+                      2147483647,
+                  epgChannelId: channel.id,
+                  sourceId: channel.providerId,
+                  title: e.title,
+                  description: e.description,
+                  start: e.start ?? DateTime.now().subtract(const Duration(hours: 1)),
+                  stop: e.end ?? DateTime.now(),
+                ))
+            .toList();
       }
     } catch (_) {}
 
@@ -750,7 +963,8 @@ class _CatchupScreenState extends ConsumerState<CatchupScreen> {
 
       if (username.isNotEmpty && password.isNotEmpty && streamId.isNotEmpty) {
         final base = '${uri.scheme}://${uri.host}${uri.hasPort ? ':${uri.port}' : ''}';
-        playUrl = '$base/timeshift/$username/$password/$durationMinutes/$startFormatted/$streamId.ts';
+        playUrl =
+            '$base/timeshift/$username/$password/$durationMinutes/$startFormatted/$streamId.ts';
       }
     } else {
       try {
@@ -758,10 +972,17 @@ class _CatchupScreenState extends ConsumerState<CatchupScreen> {
         final provider = await (dbInstance.select(dbInstance.providers)
               ..where((t) => t.id.equals(channel.providerId)))
             .getSingleOrNull();
-        if (provider != null && provider.url != null && provider.username != null && provider.password != null) {
-          final streamId = channel.id.contains('_') ? channel.id.split('_').last : channel.id;
-          final base = provider.url!.endsWith('/') ? provider.url!.substring(0, provider.url!.length - 1) : provider.url!;
-          playUrl = '$base/timeshift/${provider.username}/${provider.password}/$durationMinutes/$startFormatted/$streamId.ts';
+        if (provider != null &&
+            provider.url != null &&
+            provider.username != null &&
+            provider.password != null) {
+          final streamId =
+              channel.id.contains('_') ? channel.id.split('_').last : channel.id;
+          final base = provider.url!.endsWith('/')
+              ? provider.url!.substring(0, provider.url!.length - 1)
+              : provider.url!;
+          playUrl =
+              '$base/timeshift/${provider.username}/${provider.password}/$durationMinutes/$startFormatted/$streamId.ts';
         }
       } catch (_) {}
     }

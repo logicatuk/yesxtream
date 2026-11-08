@@ -48,3 +48,6 @@ flutter_02.png
 *.apk
 *.ipk
 *.wgt
+*.dmg
+*.exe
+
