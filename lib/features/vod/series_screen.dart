@@ -7,6 +7,7 @@ import '../../data/datasources/local/database.dart' as db;
 import '../../data/datasources/remote/tmdb_client.dart';
 import '../../data/services/app_settings.dart';
 import '../../data/services/playback_history_service.dart';
+import '../player/player_service.dart';
 import '../playlists/playlist_providers.dart';
 import '../providers/provider_manager.dart';
 
@@ -26,6 +27,14 @@ class _SeriesScreenState extends ConsumerState<SeriesScreen> {
   SeriesSortOption _sortOption = SeriesSortOption.recent;
   final _searchController = TextEditingController();
   final _categorySearchController = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    try {
+      ref.read(playerServiceProvider).stop();
+    } catch (_) {}
+  }
 
   @override
   void dispose() {

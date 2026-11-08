@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import '../../data/datasources/local/database.dart' as db;
 import '../../data/datasources/remote/tmdb_client.dart';
 import '../../data/services/playback_history_service.dart';
+import '../player/player_service.dart';
 import '../playlists/playlist_providers.dart';
 import '../providers/provider_manager.dart';
 
@@ -25,6 +26,14 @@ class _MoviesScreenState extends ConsumerState<MoviesScreen> {
   MovieSortOption _sortOption = MovieSortOption.recent;
   final _searchController = TextEditingController();
   final _categorySearchController = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    try {
+      ref.read(playerServiceProvider).stop();
+    } catch (_) {}
+  }
 
   @override
   void dispose() {

@@ -605,6 +605,7 @@ class _CatchupScreenState extends ConsumerState<CatchupScreen> {
                     'streamUrl': channel.streamUrl,
                     'channelName': channel.name,
                     'channelLogo': channel.tvgLogo,
+                    'stopOnExit': true,
                   });
                 },
                 icon: const Icon(Icons.play_arrow_rounded, size: 18),
@@ -705,6 +706,7 @@ class _CatchupScreenState extends ConsumerState<CatchupScreen> {
                                 'streamUrl': channel.streamUrl,
                                 'channelName': channel.name,
                                 'channelLogo': channel.tvgLogo,
+                                'stopOnExit': true,
                               });
                             },
                             icon: const Icon(Icons.play_arrow_rounded, size: 16),
@@ -992,6 +994,7 @@ class _CatchupScreenState extends ConsumerState<CatchupScreen> {
       'streamUrl': playUrl,
       'channelName': '${channel.name} • ${programme.title}',
       'channelLogo': channel.tvgLogo,
+      'stopOnExit': true,
     });
   }
 }

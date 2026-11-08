@@ -31,6 +31,7 @@ class PlayerScreen extends ConsumerStatefulWidget {
   final List<String> alternativeUrls;
   final List<Map<String, dynamic>> channels;
   final int currentIndex;
+  final bool? stopOnExit;
 
   const PlayerScreen({
     super.key,
@@ -40,6 +41,7 @@ class PlayerScreen extends ConsumerStatefulWidget {
     this.alternativeUrls = const [],
     this.channels = const [],
     this.currentIndex = 0,
+    this.stopOnExit,
   });
 
   @override
@@ -51,6 +53,9 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   int _currentUrlIndex = 0;
   bool _showChannelList = false;
   bool _isFavorite = false;
+  PlayerService? _playerService;
+
+  bool get _shouldStopOnExit => widget.stopOnExit ?? widget.channels.isEmpty;
 
   // Channel switching state
   late int _channelIndex;
@@ -92,6 +97,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   @override
   void initState() {
     super.initState();
+    _playerService = ref.read(playerServiceProvider);
     _channelIndex = widget.currentIndex;
     _currentChannelName = widget.channelName;
     _currentChannelLogo = widget.channelLogo;
@@ -457,6 +463,9 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
       }
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
+        if (_shouldStopOnExit) {
+          _playerService?.stop();
+        }
         GoRouter.of(context).canPop()
             ? GoRouter.of(context).pop()
             : GoRouter.of(context).go('/');
@@ -583,7 +592,21 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   }
 
   @override
+  void deactivate() {
+    final inPip = ref.read(pipServiceProvider).isInPip;
+    if (!inPip && _shouldStopOnExit) {
+      _playerService?.stop();
+    }
+    super.deactivate();
+  }
+
+  @override
   void dispose() {
+    if (_shouldStopOnExit) {
+      try {
+        _playerService?.stop();
+      } catch (_) {}
+    }
     _overlayTimer?.cancel();
     _volumeTimer?.cancel();
     _numberTimer?.cancel();
@@ -606,7 +629,14 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
       );
     }
 
-    return Focus(
+    return PopScope(
+      canPop: true,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop && _shouldStopOnExit) {
+          _playerService?.stop();
+        }
+      },
+      child: Focus(
       autofocus: true,
       onKeyEvent: _handleKeyEvent,
       child: Scaffold(
@@ -649,6 +679,9 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                             icon: const Icon(Icons.arrow_back_rounded, color: Colors.white, size: 26),
                             tooltip: 'Exit fullscreen',
                             onPressed: () {
+                              if (_shouldStopOnExit) {
+                                _playerService?.stop();
+                              }
                               GoRouter.of(context).canPop()
                                   ? GoRouter.of(context).pop()
                                   : GoRouter.of(context).go('/live');
@@ -825,7 +858,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
           ),
         ),
       ),
-    );
+    ),
+  );
   }
 
   // ---- Action handlers ----

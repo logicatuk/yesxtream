@@ -9,6 +9,7 @@ import '../../data/datasources/remote/tmdb_client.dart';
 import '../../data/datasources/remote/xtream_client.dart';
 import '../../data/services/app_settings.dart';
 import '../../data/services/playback_history_service.dart';
+import '../player/player_service.dart';
 import '../providers/provider_manager.dart';
 
 class SeriesDetailScreen extends ConsumerStatefulWidget {
@@ -36,6 +37,9 @@ class _SeriesDetailScreenState extends ConsumerState<SeriesDetailScreen> {
   @override
   void initState() {
     super.initState();
+    try {
+      ref.read(playerServiceProvider).stop();
+    } catch (_) {}
     _isFavorite = widget.series.favorite;
     _fetchDetails();
     _checkDbFavorite();

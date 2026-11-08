@@ -123,6 +123,7 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
   bool _showFailoverBanner = false;
   static const _kFailoverEnabled = 'failover_enabled';
   bool _failoverEnabled = true;
+  PlayerService? _playerService;
 
   // Provider list for sidebar
   List<db.Provider> _providers = [];
@@ -176,6 +177,7 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
   @override
   void initState() {
     super.initState();
+    _playerService = ref.read(playerServiceProvider);
     _guideScrollController = ScrollController();
     _loadChannels();
     _ensureEpgSources();
@@ -558,9 +560,15 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
   }
 
   @override
+  void deactivate() {
+    _playerService?.stop();
+    super.deactivate();
+  }
+
+  @override
   void dispose() {
     try {
-      ref.read(playerServiceProvider).stop();
+      _playerService?.stop();
     } catch (_) {}
     _searchController.dispose();
     _compactSearchController.dispose();

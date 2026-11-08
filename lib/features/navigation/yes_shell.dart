@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
 import '../../data/services/app_settings.dart';
+import '../player/player_service.dart';
 import '../playlists/playlist_providers.dart';
 import '../providers/add_provider_dialog.dart';
 
@@ -71,7 +72,12 @@ class _YesShellState extends ConsumerState<YesShell> {
             children: [
               // ── 1. Left: Brand Logo & Name ──
               InkWell(
-                onTap: () => context.go('/home'),
+                onTap: () {
+                  try {
+                    ref.read(playerServiceProvider).stop();
+                  } catch (_) {}
+                  context.go('/home');
+                },
                 borderRadius: BorderRadius.circular(8),
                 child: Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
@@ -143,12 +149,22 @@ class _YesShellState extends ConsumerState<YesShell> {
                 IconButton(
                   tooltip: 'Search',
                   icon: const Icon(Icons.search_rounded, size: 20, color: Colors.white70),
-                  onPressed: () => context.go('/search'),
+                  onPressed: () {
+                    try {
+                      ref.read(playerServiceProvider).stop();
+                    } catch (_) {}
+                    context.go('/search');
+                  },
                 ),
               ] else ...[
                 const SizedBox(width: 14),
                 InkWell(
-                  onTap: () => context.go('/search'),
+                  onTap: () {
+                    try {
+                      ref.read(playerServiceProvider).stop();
+                    } catch (_) {}
+                    context.go('/search');
+                  },
                   borderRadius: BorderRadius.circular(20),
                   child: Container(
                     width: constraints.maxWidth < 900 ? 180 : 280,
@@ -194,7 +210,16 @@ class _YesShellState extends ConsumerState<YesShell> {
     required bool isSelected,
   }) {
     return InkWell(
-      onTap: () => context.go(route),
+      onTap: () {
+        if (!isSelected) {
+          if (route != '/live') {
+            try {
+              ref.read(playerServiceProvider).stop();
+            } catch (_) {}
+          }
+          context.go(route);
+        }
+      },
       borderRadius: BorderRadius.circular(6),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),

@@ -134,6 +134,7 @@ GoRouter createRouter() {
                     ?.cast<Map<String, dynamic>>() ??
                 const [],
             currentIndex: extra['currentIndex'] as int? ?? 0,
+            stopOnExit: extra['stopOnExit'] as bool?,
           ),
         );
       },
