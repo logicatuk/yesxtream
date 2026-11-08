@@ -82,14 +82,17 @@ jobs:
         run: |
           cd build/ios/iphoneos
           mkdir -p Payload
-          cp -r Runner.app Payload/
-          zip -r clubtivi-ios-unsigned.ipa Payload
+          cp -r *.app Payload/
+          zip -r YesXtream-ios-unsigned.ipa Payload
+          cp YesXtream-ios-unsigned.ipa clubtivi-ios-unsigned.ipa || true
 
       - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
           name: ios-ipa
-          path: build/ios/iphoneos/clubtivi-ios-unsigned.ipa
+          path: |
+            build/ios/iphoneos/YesXtream-ios-unsigned.ipa
+            build/ios/iphoneos/clubtivi-ios-unsigned.ipa
 
   # ─── macOS ──────────────────────────────────────────────────────────
   build-macos:
@@ -112,15 +115,23 @@ jobs:
 
       - name: Create DMG
         run: |
-          APP_PATH="build/macos/Build/Products/Release/clubtivi.app"
-          DMG_NAME="clubtivi-macos.dmg"
-          hdiutil create -volname "clubTivi" -srcfolder "$APP_PATH" -ov -format UDZO "$DMG_NAME"
+          APP_PATH=$(find build/macos/Build/Products/Release -name "*.app" -maxdepth 1 | head -n 1)
+          if [ -z "$APP_PATH" ] || [ ! -d "$APP_PATH" ]; then
+            echo "Error: macOS .app bundle not found in build/macos/Build/Products/Release"
+            ls -la build/macos/Build/Products/Release || true
+            exit 1
+          fi
+          echo "Found app at: $APP_PATH"
+          hdiutil create -volname "YesXtream" -srcfolder "$APP_PATH" -ov -format UDZO YesXtream-macos.dmg
+          cp YesXtream-macos.dmg clubtivi-macos.dmg || true
 
       - name: Upload DMG
         uses: actions/upload-artifact@v4
         with:
           name: macos-dmg
-          path: clubtivi-macos.dmg
+          path: |
+            YesXtream-macos.dmg
+            clubtivi-macos.dmg
 
   # ─── Windows ────────────────────────────────────────────────────────
   build-windows:
@@ -142,13 +153,17 @@ jobs:
         run: flutter build windows --release
 
       - name: Create ZIP
-        run: Compress-Archive -Path "build\windows\x64\runner\Release\*" -DestinationPath "clubtivi-windows.zip"
+        run: |
+          Compress-Archive -Path "build\windows\x64\runner\Release\*" -DestinationPath "YesXtream-windows.zip"
+          Copy-Item "YesXtream-windows.zip" "clubtivi-windows.zip" -ErrorAction SilentlyContinue
 
       - name: Upload ZIP
         uses: actions/upload-artifact@v4
         with:
           name: windows-zip
-          path: clubtivi-windows.zip
+          path: |
+            YesXtream-windows.zip
+            clubtivi-windows.zip
 
   # ─── Linux ──────────────────────────────────────────────────────────
   build-linux:
@@ -179,13 +194,17 @@ jobs:
       - name: Create tarball
         run: |
           cd build/linux/x64/release
-          tar czf ../../../../clubtivi-linux-x64.tar.gz bundle/
+          tar czf ../../../../YesXtream-linux-x64.tar.gz bundle/
+          cd ../../../..
+          cp YesXtream-linux-x64.tar.gz clubtivi-linux-x64.tar.gz || true
 
       - name: Upload tarball
         uses: actions/upload-artifact@v4
         with:
           name: linux-tar
-          path: clubtivi-linux-x64.tar.gz
+          path: |
+            YesXtream-linux-x64.tar.gz
+            clubtivi-linux-x64.tar.gz
 
   # ─── Create Release ────────────────────────────────────────────────
   create-release:
@@ -205,12 +224,18 @@ jobs:
       - name: Prepare release assets
         run: |
           mkdir -p release
-          cp artifacts/android-apk/app-release.apk       release/clubtivi-android.apk
-          cp artifacts/android-aab/app-release.aab        release/clubtivi-android.aab
-          cp artifacts/ios-ipa/clubtivi-ios-unsigned.ipa   release/clubtivi-ios-unsigned.ipa
-          cp artifacts/macos-dmg/clubtivi-macos.dmg       release/clubtivi-macos.dmg
-          cp artifacts/windows-zip/clubtivi-windows.zip   release/clubtivi-windows.zip
-          cp artifacts/linux-tar/clubtivi-linux-x64.tar.gz release/clubtivi-linux-x64.tar.gz
+          # Android
+          find artifacts/android-apk -name "*.apk" -exec cp {} release/YesXtream-android.apk \;
+          find artifacts/android-aab -name "*.aab" -exec cp {} release/YesXtream-android.aab \;
+          # iOS
+          find artifacts/ios-ipa -name "*.ipa" -exec cp {} release/YesXtream-ios-unsigned.ipa \;
+          # macOS
+          find artifacts/macos-dmg -name "*.dmg" -exec cp {} release/YesXtream-macos.dmg \;
+          # Windows
+          find artifacts/windows-zip -name "*.zip" -exec cp {} release/YesXtream-windows.zip \;
+          # Linux
+          find artifacts/linux-tar -name "*.tar.gz" -exec cp {} release/YesXtream-linux-x64.tar.gz \;
+          ls -la release/
 
       - name: Create release
         uses: softprops/action-gh-release@v2
