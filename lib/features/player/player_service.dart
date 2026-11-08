@@ -8,6 +8,7 @@ import 'package:media_kit_video/media_kit_video.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'adaptive_buffer.dart';
+import 'active_player_registry.dart';
 import 'stream_proxy.dart';
 import '../../data/services/app_settings.dart';
 import '../../data/services/stream_alternatives_service.dart';
@@ -82,6 +83,7 @@ class PlayerService {
           logLevel: MPVLogLevel.warn,
         ),
       );
+      ActivePlayerRegistry.register(_player!);
       _initPlayer(_player!);
     }
     return _player!;
@@ -190,7 +192,7 @@ class PlayerService {
     _failoverGroupUrls = failoverGroupUrls;
     _tracksSub?.cancel();
     _failoverCheckTimer?.cancel();
-    _disposeWarmPlayer();
+    await _disposeWarmPlayer();
     _proxyActive = false;
     await _streamProxy.stop();
     await _ensureReady();
@@ -269,7 +271,15 @@ class PlayerService {
   /// Stop playback.
   Future<void> stop() async {
     _bufferManager.stop();
-    await player.stop();
+    _tracksSub?.cancel();
+    _failoverCheckTimer?.cancel();
+    await _disposeWarmPlayer();
+    final p = _player;
+    if (p != null) {
+      try {
+        await p.stop();
+      } catch (_) {}
+    }
   }
 
   /// Pause playback.
@@ -392,7 +402,7 @@ class PlayerService {
         _consecutiveLowBuffer = 0;
         // Buffer recovered — dispose warm player if not yet used
         if (_warmPlayer != null && !_warmReady) {
-          _disposeWarmPlayer();
+          unawaited(_disposeWarmPlayer());
         }
       }
     });
@@ -437,6 +447,7 @@ class PlayerService {
     _warmPlayer = Player(
       configuration: const PlayerConfiguration(logLevel: MPVLogLevel.warn),
     );
+    ActivePlayerRegistry.register(_warmPlayer!);
 
     // Configure warm player: muted, with loudnorm, no video output
     if (!kIsWeb) {
@@ -470,21 +481,30 @@ class PlayerService {
     _warmTimeoutTimer = Timer(const Duration(seconds: 10), () {
       if (!_warmReady) {
         debugPrint('[Failover] Warm pre-buffer timed out');
-        _disposeWarmPlayer();
+        unawaited(_disposeWarmPlayer());
       }
     });
   }
 
   /// Dispose the warm pre-buffer player and clean up.
-  void _disposeWarmPlayer() {
+  Future<void> _disposeWarmPlayer() async {
     _warmBufferSub?.cancel();
     _warmBufferSub = null;
     _warmTimeoutTimer?.cancel();
     _warmTimeoutTimer = null;
-    _warmPlayer?.dispose();
+    final wp = _warmPlayer;
     _warmPlayer = null;
     _warmUrl = null;
     _warmReady = false;
+    if (wp != null) {
+      ActivePlayerRegistry.unregister(wp);
+      try {
+        await wp.stop();
+      } catch (_) {}
+      try {
+        await wp.dispose();
+      } catch (_) {}
+    }
   }
 
   Future<void> _autoFailover() async {
@@ -499,7 +519,7 @@ class PlayerService {
       _failoverCheckTimer?.cancel();
 
       // Dispose warm player (we'll re-open on main player)
-      _disposeWarmPlayer();
+      await _disposeWarmPlayer();
 
       // Switch main player to the pre-buffered URL
       _currentUrl = newUrl;
@@ -525,7 +545,7 @@ class PlayerService {
 
     // Switch stream (keep channel metadata — it's the same content)
     _failoverCheckTimer?.cancel();
-    _disposeWarmPlayer();
+    await _disposeWarmPlayer();
     _currentUrl = newUrl;
     _proxyActive = false;
     await _streamProxy.stop();
@@ -538,16 +558,54 @@ class PlayerService {
     onFailover?.call('⚡ Switched stream');
   }
 
-  void dispose() {
+  /// Cleanly shuts down the player and all associated resources asynchronously.
+  Future<void> dispose() async {
     _bufferManager.stop();
     _tracksSub?.cancel();
     _bufferTrackSub?.cancel();
     _bufferTrackTimer?.cancel();
     _failoverCheckTimer?.cancel();
-    _disposeWarmPlayer();
+    await _disposeWarmPlayer();
     _healthTracker?.save();
-    _streamProxy.stop();
-    _player?.dispose();
+    try {
+      await _streamProxy.stop();
+    } catch (_) {}
+    final p = _player;
+    _player = null;
+    _videoController = null;
+    if (p != null) {
+      ActivePlayerRegistry.unregister(p);
+      try {
+        await p.stop();
+      } catch (_) {}
+      try {
+        await p.dispose();
+      } catch (_) {}
+    }
+  }
+
+  /// Best-effort synchronous cleanup for detached lifecycle events.
+  void disposeSync() {
+    _bufferManager.stop();
+    _tracksSub?.cancel();
+    _bufferTrackSub?.cancel();
+    _bufferTrackTimer?.cancel();
+    _failoverCheckTimer?.cancel();
+    unawaited(_disposeWarmPlayer());
+    _healthTracker?.save();
+    try {
+      _streamProxy.stop();
+    } catch (_) {}
+    final p = _player;
+    _player = null;
+    _videoController = null;
+    if (p != null) {
+      ActivePlayerRegistry.unregister(p);
+      try {
+        p.stop();
+        p.dispose();
+      } catch (_) {}
+    }
   }
 }
 
@@ -562,6 +620,6 @@ final playerServiceProvider = Provider<PlayerService>((ref) {
   } catch (_) {
     // Services may not be available yet — failover will be disabled
   }
-  ref.onDispose(() => service.dispose());
+  ref.onDispose(() => service.disposeSync());
   return service;
 });

@@ -5,6 +5,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
+import 'active_player_registry.dart';
+
 /// Multi-view player — shows 1-9 streams in a flexible grid.
 /// Free feature. Tap a cell to focus audio; long-press to fullscreen.
 class MultiViewScreen extends ConsumerStatefulWidget {
@@ -30,6 +32,7 @@ class _MultiViewScreenState extends ConsumerState<MultiViewScreen> {
   void _initPlayers() {
     for (var i = 0; i < widget.channels.length && i < 9; i++) {
       final player = Player();
+      ActivePlayerRegistry.register(player);
       _configurePlayer(player);
       final controller = VideoController(player);
       _cells.add(_StreamCell(
@@ -76,6 +79,7 @@ class _MultiViewScreenState extends ConsumerState<MultiViewScreen> {
   @override
   void dispose() {
     for (final cell in _cells) {
+      ActivePlayerRegistry.unregister(cell.player);
       cell.player.dispose();
     }
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
