@@ -45,6 +45,7 @@ class TmdbClient {
   /// Build a full image URL from a TMDB file path
   static String imageUrl(String? path, {String size = 'w500'}) {
     if (path == null || path.isEmpty) return '';
+    if (path.startsWith('http://') || path.startsWith('https://')) return path;
     return '$_imageBase/$size$path';
   }
 

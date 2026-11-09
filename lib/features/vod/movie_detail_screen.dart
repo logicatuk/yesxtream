@@ -344,7 +344,7 @@ class _MovieDetailScreenState extends ConsumerState<MovieDetailScreen> {
                 child: CachedNetworkImage(
                   imageUrl: backdropUrl,
                   fit: BoxFit.cover,
-                  errorWidget: (_, __, ___) => const SizedBox.shrink(),
+                  errorWidget: (_, _, _) => const SizedBox.shrink(),
                 ),
               ),
             ),
@@ -380,15 +380,14 @@ class _MovieDetailScreenState extends ConsumerState<MovieDetailScreen> {
                   ),
                 ),
                 Expanded(
-                  child: SingleChildScrollView(
-                    padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        // Poster Card
-                        Container(
-                          width: 220,
-                          height: 330,
+                  child: LayoutBuilder(
+                    builder: (context, constraints) {
+                      final isNarrow = constraints.maxWidth < 700;
+
+                      Widget posterCard({double? width, double? height}) {
+                        return Container(
+                          width: width ?? 220,
+                          height: height ?? 330,
                           decoration: BoxDecoration(
                             borderRadius: BorderRadius.circular(16),
                             boxShadow: [
@@ -404,7 +403,7 @@ class _MovieDetailScreenState extends ConsumerState<MovieDetailScreen> {
                               ? CachedNetworkImage(
                                   imageUrl: posterUrl,
                                   fit: BoxFit.cover,
-                                  errorWidget: (_, __, ___) => Container(
+                                  errorWidget: (_, _, _) => Container(
                                     color: const Color(0xFF1E1E2E),
                                     child: const Icon(Icons.movie, size: 64, color: Colors.white24),
                                   ),
@@ -413,100 +412,196 @@ class _MovieDetailScreenState extends ConsumerState<MovieDetailScreen> {
                                   color: const Color(0xFF1E1E2E),
                                   child: const Icon(Icons.movie, size: 64, color: Colors.white24),
                                 ),
-                        ),
-                        const SizedBox(width: 36),
+                        );
+                      }
 
-                        // Movie Info
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                widget.movie.name,
-                                style: const TextStyle(
-                                  fontSize: 30,
-                                  fontWeight: FontWeight.w900,
-                                  color: Colors.white,
-                                  letterSpacing: -0.5,
+                      Widget buildBadges() {
+                        return Wrap(
+                          spacing: 10,
+                          runSpacing: 8,
+                          alignment: isNarrow ? WrapAlignment.center : WrapAlignment.start,
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          children: [
+                            if (userScore != null && userScore.isNotEmpty)
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFF39C12).withValues(alpha: 0.2),
+                                  borderRadius: BorderRadius.circular(6),
+                                  border: Border.all(color: const Color(0xFFF39C12), width: 1),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const Icon(Icons.star_rounded, size: 16, color: Color(0xFFF39C12)),
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      userScore,
+                                      style: const TextStyle(
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.bold,
+                                        color: Color(0xFFF39C12),
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               ),
-                              const SizedBox(height: 12),
+                            if (releaseDate != null && releaseDate.isNotEmpty)
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withValues(alpha: 0.08),
+                                  borderRadius: BorderRadius.circular(6),
+                                  border: Border.all(color: Colors.white24),
+                                ),
+                                child: Text(
+                                  releaseDate,
+                                  style: const TextStyle(fontSize: 12, color: Colors.white70),
+                                ),
+                              ),
+                            if (durationStr.isNotEmpty)
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withValues(alpha: 0.08),
+                                  borderRadius: BorderRadius.circular(6),
+                                  border: Border.all(color: Colors.white24),
+                                ),
+                                child: Text(
+                                  durationStr,
+                                  style: const TextStyle(fontSize: 12, color: Colors.white70),
+                                ),
+                              ),
+                            for (final g in genres.take(3))
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF6C5CE7).withValues(alpha: 0.2),
+                                  borderRadius: BorderRadius.circular(6),
+                                  border: Border.all(color: const Color(0xFF6C5CE7).withValues(alpha: 0.5)),
+                                ),
+                                child: Text(
+                                  g,
+                                  style: const TextStyle(fontSize: 12, color: Color(0xFFA29BFE)),
+                                ),
+                              ),
+                          ],
+                        );
+                      }
 
-                              // Badges: User Score, Year, Duration, Genres
-                              Wrap(
-                                spacing: 10,
-                                runSpacing: 8,
-                                crossAxisAlignment: WrapCrossAlignment.center,
-                                children: [
-                                  if (userScore != null && userScore.isNotEmpty)
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                                      decoration: BoxDecoration(
-                                        color: const Color(0xFFF39C12).withValues(alpha: 0.2),
-                                        borderRadius: BorderRadius.circular(6),
-                                        border: Border.all(color: const Color(0xFFF39C12), width: 1),
-                                      ),
-                                      child: Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          const Icon(Icons.star_rounded, size: 16, color: Color(0xFFF39C12)),
-                                          const SizedBox(width: 4),
-                                          Text(
-                                            userScore,
-                                            style: const TextStyle(
-                                              fontSize: 13,
-                                              fontWeight: FontWeight.bold,
-                                              color: Color(0xFFF39C12),
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  if (releaseDate != null && releaseDate.isNotEmpty)
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                      decoration: BoxDecoration(
-                                        color: Colors.white.withValues(alpha: 0.08),
-                                        borderRadius: BorderRadius.circular(6),
-                                        border: Border.all(color: Colors.white24),
-                                      ),
-                                      child: Text(
-                                        releaseDate,
-                                        style: const TextStyle(fontSize: 12, color: Colors.white70),
-                                      ),
-                                    ),
-                                  if (durationStr.isNotEmpty)
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                      decoration: BoxDecoration(
-                                        color: Colors.white.withValues(alpha: 0.08),
-                                        borderRadius: BorderRadius.circular(6),
-                                        border: Border.all(color: Colors.white24),
-                                      ),
-                                      child: Text(
-                                        durationStr,
-                                        style: const TextStyle(fontSize: 12, color: Colors.white70),
-                                      ),
-                                    ),
-                                  for (final g in genres.take(3))
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                      decoration: BoxDecoration(
-                                        color: const Color(0xFF6C5CE7).withValues(alpha: 0.2),
-                                        borderRadius: BorderRadius.circular(6),
-                                        border: Border.all(color: const Color(0xFF6C5CE7).withValues(alpha: 0.5)),
-                                      ),
-                                      child: Text(
-                                        g,
-                                        style: const TextStyle(fontSize: 12, color: Color(0xFFA29BFE)),
-                                      ),
-                                    ),
-                                ],
+                      Widget buildActionButtons() {
+                        return Wrap(
+                          spacing: 12,
+                          runSpacing: 10,
+                          alignment: isNarrow ? WrapAlignment.center : WrapAlignment.start,
+                          children: [
+                            FilledButton.icon(
+                              onPressed: () => _play(),
+                              style: FilledButton.styleFrom(
+                                backgroundColor: const Color(0xFF6C5CE7),
+                                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                              ),
+                              icon: const Icon(Icons.play_arrow_rounded, size: 22),
+                              label: Text(
+                                hasProgress ? settings.tr('resume_movie') : settings.tr('play_movie'),
+                                style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+                              ),
+                            ),
+                            if (trailerKey != null && trailerKey.isNotEmpty)
+                              OutlinedButton.icon(
+                                onPressed: () => _launchTrailer(trailerKey),
+                                style: OutlinedButton.styleFrom(
+                                  side: const BorderSide(color: Color(0xFFE74C3C)),
+                                  padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                ),
+                                icon: const Icon(Icons.play_circle_outline_rounded, color: Color(0xFFE74C3C), size: 20),
+                                label: Text(
+                                  settings.tr('trailer'),
+                                  style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold),
+                                ),
+                              ),
+                            OutlinedButton.icon(
+                              onPressed: _toggleFavorite,
+                              style: OutlinedButton.styleFrom(
+                                side: BorderSide(
+                                  color: _isFavorite
+                                      ? const Color(0xFFFFD32A).withValues(alpha: 0.8)
+                                      : const Color(0xFF2E2C42),
+                                ),
+                                backgroundColor: _isFavorite
+                                    ? const Color(0xFFFFD32A).withValues(alpha: 0.12)
+                                    : Colors.transparent,
+                                padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                              ),
+                              icon: Icon(
+                                _isFavorite
+                                    ? Icons.star_rounded
+                                    : Icons.star_outline_rounded,
+                                color: _isFavorite
+                                    ? const Color(0xFFFFD32A)
+                                    : Colors.white70,
+                              ),
+                              label: Text(
+                                _isFavorite ? 'Favorited' : 'Favorite',
+                                style: TextStyle(
+                                  color: _isFavorite ? const Color(0xFFFFD32A) : Colors.white,
+                                  fontSize: 14,
+                                  fontWeight: _isFavorite ? FontWeight.bold : FontWeight.normal,
+                                ),
+                              ),
+                            ),
+                          ],
+                        );
+                      }
+
+                      Widget buildDetails() {
+                        return Column(
+                          crossAxisAlignment: isNarrow ? CrossAxisAlignment.center : CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              widget.movie.name,
+                              textAlign: isNarrow ? TextAlign.center : TextAlign.start,
+                              style: TextStyle(
+                                fontSize: isNarrow ? 22 : 30,
+                                fontWeight: FontWeight.w900,
+                                color: Colors.white,
+                                letterSpacing: -0.5,
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                            buildBadges(),
+                            const SizedBox(height: 18),
+                            buildActionButtons(),
+                            const SizedBox(height: 20),
+                            if (hasProgress) ...[
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(4),
+                                child: LinearProgressIndicator(
+                                  value: historyItem.progressFraction,
+                                  backgroundColor: Colors.white12,
+                                  valueColor: const AlwaysStoppedAnimation(Color(0xFF6C5CE7)),
+                                  minHeight: 6,
+                                ),
+                              ),
+                              const SizedBox(height: 6),
+                              Text(
+                                'Resume at ${_formatTimeMs(historyItem.positionMs)} / ${_formatTimeMs(historyItem.durationMs)}',
+                                style: const TextStyle(fontSize: 12, color: Colors.white54),
                               ),
                               const SizedBox(height: 20),
-
-                              // Overview / Synopsis
-                              Text(
+                            ],
+                            Align(
+                              alignment: Alignment.centerLeft,
+                              child: Text(
                                 settings.tr('plot'),
                                 style: const TextStyle(
                                   fontSize: 16,
@@ -514,8 +609,11 @@ class _MovieDetailScreenState extends ConsumerState<MovieDetailScreen> {
                                   color: Colors.white,
                                 ),
                               ),
-                              const SizedBox(height: 6),
-                              Text(
+                            ),
+                            const SizedBox(height: 6),
+                            Align(
+                              alignment: Alignment.centerLeft,
+                              child: Text(
                                 synopsis,
                                 style: const TextStyle(
                                   fontSize: 14,
@@ -523,23 +621,24 @@ class _MovieDetailScreenState extends ConsumerState<MovieDetailScreen> {
                                   color: Colors.white70,
                                 ),
                               ),
-                              const SizedBox(height: 20),
-
-                              // Director
-                              if (director != null && director.isNotEmpty) ...[
-                                Row(
-                                  children: [
-                                    Text('${settings.tr('director')}: ',
-                                        style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white70, fontSize: 13)),
-                                    Text(director, style: const TextStyle(color: Colors.white, fontSize: 13)),
-                                  ],
-                                ),
-                                const SizedBox(height: 12),
-                              ],
-
-                              // Cast section
-                              if (castList.isNotEmpty) ...[
-                                Text(
+                            ),
+                            const SizedBox(height: 20),
+                            if (director != null && director.isNotEmpty) ...[
+                              Row(
+                                children: [
+                                  Text('${settings.tr('director')}: ',
+                                      style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white70, fontSize: 13)),
+                                  Expanded(
+                                    child: Text(director, style: const TextStyle(color: Colors.white, fontSize: 13)),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 12),
+                            ],
+                            if (castList.isNotEmpty) ...[
+                              Align(
+                                alignment: Alignment.centerLeft,
+                                child: Text(
                                   settings.tr('cast'),
                                   style: const TextStyle(
                                     fontSize: 15,
@@ -547,8 +646,11 @@ class _MovieDetailScreenState extends ConsumerState<MovieDetailScreen> {
                                     color: Colors.white,
                                   ),
                                 ),
-                                const SizedBox(height: 8),
-                                Wrap(
+                              ),
+                              const SizedBox(height: 8),
+                              Align(
+                                alignment: Alignment.centerLeft,
+                                child: Wrap(
                                   spacing: 8,
                                   runSpacing: 6,
                                   children: [
@@ -567,111 +669,42 @@ class _MovieDetailScreenState extends ConsumerState<MovieDetailScreen> {
                                       ),
                                   ],
                                 ),
-                                const SizedBox(height: 24),
-                              ],
-
-                              // Progress bar if saved progress exists
-                              if (hasProgress) ...[
-                                Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    ClipRRect(
-                                      borderRadius: BorderRadius.circular(4),
-                                      child: LinearProgressIndicator(
-                                        value: historyItem.progressFraction,
-                                        backgroundColor: Colors.white12,
-                                        valueColor: const AlwaysStoppedAnimation(Color(0xFF6C5CE7)),
-                                        minHeight: 6,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 6),
-                                    Text(
-                                      'Resume at ${_formatTimeMs(historyItem.positionMs)} / ${_formatTimeMs(historyItem.durationMs)}',
-                                      style: const TextStyle(fontSize: 12, color: Colors.white54),
-                                    ),
-                                  ],
-                                ),
-                                const SizedBox(height: 20),
-                              ],
-
-                              // Action Buttons: Play / Resume, Trailer, Favorite
-                              Wrap(
-                                spacing: 14,
-                                runSpacing: 10,
-                                children: [
-                                  FilledButton.icon(
-                                    onPressed: () => _play(),
-                                    style: FilledButton.styleFrom(
-                                      backgroundColor: const Color(0xFF6C5CE7),
-                                      padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 14),
-                                      shape: RoundedRectangleBorder(
-                                        borderRadius: BorderRadius.circular(10),
-                                      ),
-                                    ),
-                                    icon: const Icon(Icons.play_arrow_rounded, size: 22),
-                                    label: Text(
-                                      hasProgress ? settings.tr('resume_movie') : settings.tr('play_movie'),
-                                      style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
-                                    ),
-                                  ),
-
-                                  if (trailerKey != null && trailerKey.isNotEmpty)
-                                    OutlinedButton.icon(
-                                      onPressed: () => _launchTrailer(trailerKey),
-                                      style: OutlinedButton.styleFrom(
-                                        side: const BorderSide(color: Color(0xFFE74C3C)),
-                                        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-                                        shape: RoundedRectangleBorder(
-                                          borderRadius: BorderRadius.circular(10),
-                                        ),
-                                      ),
-                                      icon: const Icon(Icons.play_circle_outline_rounded, color: Color(0xFFE74C3C), size: 20),
-                                      label: Text(
-                                        settings.tr('trailer'),
-                                        style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold),
-                                      ),
-                                    ),
-
-                                  OutlinedButton.icon(
-                                    onPressed: _toggleFavorite,
-                                    style: OutlinedButton.styleFrom(
-                                      side: BorderSide(
-                                        color: _isFavorite
-                                            ? const Color(0xFFFFD32A).withValues(alpha: 0.8)
-                                            : const Color(0xFF2E2C42),
-                                      ),
-                                      backgroundColor: _isFavorite
-                                          ? const Color(0xFFFFD32A).withValues(alpha: 0.12)
-                                          : Colors.transparent,
-                                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-                                      shape: RoundedRectangleBorder(
-                                        borderRadius: BorderRadius.circular(10),
-                                      ),
-                                    ),
-                                    icon: Icon(
-                                      _isFavorite
-                                          ? Icons.star_rounded
-                                          : Icons.star_outline_rounded,
-                                      color: _isFavorite
-                                          ? const Color(0xFFFFD32A)
-                                          : Colors.white70,
-                                    ),
-                                    label: Text(
-                                      _isFavorite ? 'Favorited' : 'Favorite',
-                                      style: TextStyle(
-                                        color: _isFavorite ? const Color(0xFFFFD32A) : Colors.white,
-                                        fontSize: 14,
-                                        fontWeight: _isFavorite ? FontWeight.bold : FontWeight.normal,
-                                      ),
-                                    ),
-                                  ),
-                                ],
                               ),
+                              const SizedBox(height: 24),
+                            ],
+                          ],
+                        );
+                      }
+
+                      if (isNarrow) {
+                        return SingleChildScrollView(
+                          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.center,
+                            children: [
+                              posterCard(
+                                width: constraints.maxWidth < 400 ? 160 : 190,
+                                height: constraints.maxWidth < 400 ? 240 : 285,
+                              ),
+                              const SizedBox(height: 20),
+                              buildDetails(),
                             ],
                           ),
+                        );
+                      }
+
+                      return SingleChildScrollView(
+                        padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            posterCard(),
+                            const SizedBox(width: 36),
+                            Expanded(child: buildDetails()),
+                          ],
                         ),
-                      ],
-                    ),
+                      );
+                    },
                   ),
                 ),
               ],

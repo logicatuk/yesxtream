@@ -243,36 +243,47 @@ class _TrackSelectionHudState extends ConsumerState<TrackSelectionHud>
 
             // Tab Bar
             Container(
-              margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+              margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              padding: const EdgeInsets.all(4),
               decoration: BoxDecoration(
-                color: const Color(0xFF161524),
+                color: const Color(0xFF141322),
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: const Color(0xFF242238)),
+                border: Border.all(color: const Color(0xFF26243A)),
               ),
               child: TabBar(
                 controller: _tabController,
+                indicatorSize: TabBarIndicatorSize.tab,
                 indicator: BoxDecoration(
-                  borderRadius: BorderRadius.circular(10),
-                  color: const Color(0xFF8B5CF6),
-                  boxShadow: const [
-                    BoxShadow(color: Color(0x668B5CF6), blurRadius: 10, spreadRadius: 1),
-                  ],
+                  borderRadius: BorderRadius.circular(8),
+                  color: const Color(0xFF2B2848),
+                  border: Border.all(
+                    color: const Color(0xFF6C5CE7).withValues(alpha: 0.7),
+                    width: 1.2,
+                  ),
                 ),
+                dividerColor: Colors.transparent,
                 labelColor: Colors.white,
-                unselectedLabelColor: Colors.white60,
-                labelStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
+                unselectedLabelColor: Colors.white54,
+                labelStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                unselectedLabelStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.normal),
                 tabs: [
                   Tab(
+                    height: 48,
                     icon: const Icon(Icons.audiotrack_rounded, size: 18),
                     text: '${settings.tr('audio_tracks')} (${audioList.length})',
+                    iconMargin: const EdgeInsets.only(bottom: 2),
                   ),
                   Tab(
+                    height: 48,
                     icon: const Icon(Icons.subtitles_rounded, size: 18),
                     text: '${settings.tr('subtitle_tracks')} (${subtitleList.length})',
+                    iconMargin: const EdgeInsets.only(bottom: 2),
                   ),
                   Tab(
+                    height: 48,
                     icon: const Icon(Icons.speed_rounded, size: 18),
                     text: settings.tr('buffer_mode'),
+                    iconMargin: const EdgeInsets.only(bottom: 2),
                   ),
                 ],
               ),

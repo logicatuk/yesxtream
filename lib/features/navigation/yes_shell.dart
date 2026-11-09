@@ -143,20 +143,8 @@ class _YesShellState extends ConsumerState<YesShell> {
                 isSelected: location.startsWith('/series'),
               ),
 
-              // ── 3. Search Bar (Adaptive) ──
-              if (isCompact) ...[
-                const SizedBox(width: 8),
-                IconButton(
-                  tooltip: 'Search',
-                  icon: const Icon(Icons.search_rounded, size: 20, color: Colors.white70),
-                  onPressed: () {
-                    try {
-                      ref.read(playerServiceProvider).stop();
-                    } catch (_) {}
-                    context.go('/search');
-                  },
-                ),
-              ] else ...[
+              // ── 3. Desktop Search & Timer (Hidden on mobile/compact) ──
+              if (!isCompact) ...[
                 const SizedBox(width: 14),
                 InkWell(
                   onTap: () {
@@ -190,12 +178,9 @@ class _YesShellState extends ConsumerState<YesShell> {
                     ),
                   ),
                 ),
+                const Spacer(),
+                const _ShellClockTimer(),
               ],
-
-              const Spacer(),
-
-              // Clock Timer (HH:mm)
-              const _ShellClockTimer(),
             ],
           );
         },
