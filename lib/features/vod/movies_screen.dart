@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:drift/drift.dart' hide Column;
 import 'package:flutter/material.dart';
@@ -9,6 +10,7 @@ import '../../data/services/playback_history_service.dart';
 import '../player/player_service.dart';
 import '../playlists/playlist_providers.dart';
 import '../providers/provider_manager.dart';
+import 'vod_cache_provider.dart';
 
 enum MovieSortOption { recent, alphabetical, year }
 
@@ -26,6 +28,18 @@ class _MoviesScreenState extends ConsumerState<MoviesScreen> {
   MovieSortOption _sortOption = MovieSortOption.recent;
   final _searchController = TextEditingController();
   final _categorySearchController = TextEditingController();
+  final _scrollController = ScrollController();
+
+  Map<String, int> _categoryCounts = {};
+  List<String> _sortedGroups = [];
+  int _allCount = 0;
+  int _favCount = 0;
+  List<db.Channel> _movies = [];
+  bool _loadingCategories = true;
+  bool _loadingMovies = false;
+  int _offset = 0;
+  bool _hasMore = true;
+  Timer? _searchDebounce;
 
   @override
   void initState() {
@@ -33,10 +47,160 @@ class _MoviesScreenState extends ConsumerState<MoviesScreen> {
     try {
       ref.read(playerServiceProvider).stop();
     } catch (_) {}
+
+    _scrollController.addListener(_onScroll);
+
+    final cache = ref.read(vodCacheProvider);
+    final activePlaylist = ref.read(activePlaylistProvider);
+    if (cache.isLoaded && cache.providerId == activePlaylist?.id) {
+      _categoryCounts = cache.categoryCounts;
+      _sortedGroups = cache.sortedGroups;
+      _allCount = cache.allCount;
+      _favCount = cache.favCount;
+      _selectedCategory = cache.selectedCategory;
+      _movies = cache.movies;
+      _loadingCategories = false;
+      _loadingMovies = false;
+      _offset = cache.movies.length;
+      _hasMore = cache.movies.length >= 120;
+    } else {
+      _loadCategories();
+      _loadMovies(reset: true);
+    }
+  }
+
+  void _onScroll() {
+    if (_scrollController.hasClients &&
+        _scrollController.position.pixels >= _scrollController.position.maxScrollExtent - 400) {
+      if (!_loadingMovies && _hasMore) {
+        _loadMovies(reset: false);
+      }
+    }
+  }
+
+  void _updateCache() {
+    final activePlaylist = ref.read(activePlaylistProvider);
+    ref.read(vodCacheProvider.notifier).state = VodCacheState(
+      providerId: activePlaylist?.id,
+      categoryCounts: _categoryCounts,
+      sortedGroups: _sortedGroups,
+      allCount: _allCount,
+      favCount: _favCount,
+      selectedCategory: _selectedCategory,
+      movies: _movies,
+      isLoaded: true,
+    );
+  }
+
+  Future<void> _loadCategories() async {
+    final dbInstance = ref.read(databaseProvider);
+    final activePlaylist = ref.read(activePlaylistProvider);
+    final pid = activePlaylist?.id;
+
+    try {
+      final counts = await dbInstance.getVodGroupCounts(providerId: pid);
+      final total = await dbInstance.getVodTotalCount(providerId: pid);
+      final favs = await dbInstance.getVodFavoriteCount(providerId: pid);
+      final sorted = counts.keys.toList()..sort();
+
+      if (mounted) {
+        setState(() {
+          _categoryCounts = counts;
+          _sortedGroups = sorted;
+          _allCount = total;
+          _favCount = favs;
+          _loadingCategories = false;
+        });
+        _updateCache();
+      }
+    } catch (_) {
+      if (mounted) setState(() => _loadingCategories = false);
+    }
+  }
+
+  Future<void> _loadMovies({bool reset = false}) async {
+    if (_loadingMovies) return;
+    if (!reset && !_hasMore) return;
+
+    final nextOffset = reset ? 0 : _offset;
+    if (mounted) setState(() => _loadingMovies = true);
+
+    final dbInstance = ref.read(databaseProvider);
+    final activePlaylist = ref.read(activePlaylistProvider);
+    final history = ref.read(watchHistoryProvider);
+    final pid = activePlaylist?.id;
+
+    List<db.Channel> fetched = [];
+
+    try {
+      if (_selectedCategory == 'Recently Viewed') {
+        final historyIds = history.map((h) => h.id).toSet();
+        if (historyIds.isNotEmpty) {
+          final allRecent = await dbInstance.getChannelsByIds(historyIds);
+          fetched = allRecent.where((c) => c.streamType == 'vod').toList();
+        }
+        _hasMore = false;
+      } else {
+        final sortStr = _sortOption == MovieSortOption.alphabetical
+            ? 'alphabetical'
+            : (_sortOption == MovieSortOption.year ? 'year' : 'recent');
+
+        fetched = await dbInstance.getVodMoviesPaged(
+          providerId: pid,
+          groupTitle: _selectedCategory,
+          searchQuery: _searchQuery,
+          favoritesOnly: _selectedCategory == 'Favorites',
+          limit: 120,
+          offset: nextOffset,
+          sortBy: sortStr,
+        );
+        _hasMore = fetched.length >= 120;
+      }
+
+      if (mounted) {
+        setState(() {
+          if (reset) {
+            _movies = fetched;
+            _offset = fetched.length;
+          } else {
+            _movies.addAll(fetched);
+            _offset += fetched.length;
+          }
+          _loadingMovies = false;
+        });
+        _updateCache();
+      }
+    } catch (_) {
+      if (mounted) setState(() => _loadingMovies = false);
+    }
+  }
+
+  void _selectCategory(String cat) {
+    if (_selectedCategory == cat) return;
+    setState(() {
+      _selectedCategory = cat;
+    });
+    _loadMovies(reset: true);
+  }
+
+  void _onSearchChanged(String val) {
+    setState(() => _searchQuery = val);
+    _searchDebounce?.cancel();
+    _searchDebounce = Timer(const Duration(milliseconds: 300), () {
+      _loadMovies(reset: true);
+    });
+  }
+
+  void _onSortChanged(MovieSortOption opt) {
+    setState(() => _sortOption = opt);
+    _loadMovies(reset: true);
   }
 
   @override
   void dispose() {
+    _searchDebounce?.cancel();
+    _scrollController.removeListener(_onScroll);
+    _scrollController.dispose();
     _searchController.dispose();
     _categorySearchController.dispose();
     super.dispose();
@@ -44,101 +208,53 @@ class _MoviesScreenState extends ConsumerState<MoviesScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final activePlaylist = ref.watch(activePlaylistProvider);
-    final dbInstance = ref.watch(databaseProvider);
     final history = ref.watch(watchHistoryProvider);
+    final recentCount = history.where((h) => h.streamType == 'vod').length;
+
+    if (_loadingCategories && _movies.isEmpty) {
+      return const Scaffold(
+        backgroundColor: Color(0xFF0A0A0F),
+        body: Center(
+          child: CircularProgressIndicator(color: Color(0xFF6C5CE7)),
+        ),
+      );
+    }
+
+    if (!_loadingCategories && _allCount == 0 && _movies.isEmpty) {
+      return Scaffold(
+        backgroundColor: const Color(0xFF0A0A0F),
+        body: _buildTmdbFallbackView(context),
+      );
+    }
+
+    final catQuery = _categorySearchQuery.trim().toLowerCase();
+    final visibleGroups = _sortedGroups.where((g) {
+      if (catQuery.isEmpty) return true;
+      return g.toLowerCase().contains(catQuery);
+    }).toList();
 
     return Scaffold(
       backgroundColor: const Color(0xFF0A0A0F),
-      body: FutureBuilder<List<db.Channel>>(
-        future: activePlaylist != null
-            ? (dbInstance.select(dbInstance.channels)
-                  ..where((t) =>
-                      t.providerId.equals(activePlaylist.id) &
-                      t.streamType.equals('vod')))
-                .get()
-            : (dbInstance.select(dbInstance.channels)
-                  ..where((t) => t.streamType.equals('vod')))
-                .get(),
-        builder: (context, snapshot) {
-          final allMovies = snapshot.data ?? [];
-
-          // If no local VOD channels in playlist, fetch TMDB trending movies as fallback
-          if (snapshot.connectionState == ConnectionState.done && allMovies.isEmpty) {
-            return _buildTmdbFallbackView(context);
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          final isCompact = constraints.maxWidth < 750;
+          if (isCompact) {
+            return _buildCompactLayout(
+              context,
+              _sortedGroups,
+              _categoryCounts,
+              _allCount,
+              _favCount,
+              recentCount,
+              _movies,
+              history,
+              constraints,
+            );
           }
 
-          // Extract distinct categories and counts
-          final categoryCounts = <String, int>{};
-          for (final m in allMovies) {
-            final g = m.groupTitle;
-            if (g != null && g.isNotEmpty) {
-              categoryCounts[g] = (categoryCounts[g] ?? 0) + 1;
-            }
-          }
-          final favCount = allMovies.where((m) => m.favorite).length;
-          final recentCount = history.where((h) => allMovies.any((m) => m.id == h.id)).length;
-          final allCount = allMovies.length;
-
-          final sortedGroups = categoryCounts.keys.toList()..sort();
-
-          // Filter by category
-          var filtered = allMovies.where((m) {
-            if (_selectedCategory == 'Recently Viewed') {
-              return history.any((h) => h.id == m.id);
-            }
-            if (_selectedCategory == 'Favorites') return m.favorite;
-            if (_selectedCategory == 'All') return true;
-            return m.groupTitle == _selectedCategory;
-          }).toList();
-
-          // Filter by search query
-          if (_searchQuery.isNotEmpty) {
-            final q = _searchQuery.toLowerCase();
-            filtered = filtered
-                .where((m) => m.name.toLowerCase().contains(q))
-                .toList();
-          }
-
-          // Sort
-          switch (_sortOption) {
-            case MovieSortOption.recent:
-              break;
-            case MovieSortOption.alphabetical:
-              filtered.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
-              break;
-            case MovieSortOption.year:
-              filtered.sort((a, b) => b.name.compareTo(a.name));
-              break;
-          }
-
-          // Filter categories by search
-          final catQuery = _categorySearchQuery.trim().toLowerCase();
-          final visibleGroups = sortedGroups.where((g) {
-            if (catQuery.isEmpty) return true;
-            return g.toLowerCase().contains(catQuery);
-          }).toList();
-
-          return LayoutBuilder(
-            builder: (context, constraints) {
-              final isCompact = constraints.maxWidth < 750;
-              if (isCompact) {
-                return _buildCompactLayout(
-                  context,
-                  sortedGroups,
-                  categoryCounts,
-                  allCount,
-                  favCount,
-                  recentCount,
-                  filtered,
-                  history,
-                  constraints,
-                );
-              }
-
-              return Row(
-                children: [
-                  // ── Left Sidebar Categories (Screenshot 2) ──
+          return Row(
+            children: [
+              // ── Left Sidebar Categories ──
               Container(
                 width: 260,
                 decoration: const BoxDecoration(
@@ -149,7 +265,7 @@ class _MoviesScreenState extends ConsumerState<MoviesScreen> {
                 ),
                 child: Column(
                   children: [
-                    // Header: Clapperboard Icon + Retour / Rechercher buttons
+                    // Header: Clapperboard Icon + Back / Search
                     Padding(
                       padding: const EdgeInsets.fromLTRB(16, 16, 16, 10),
                       child: Column(
@@ -220,12 +336,12 @@ class _MoviesScreenState extends ConsumerState<MoviesScreen> {
                         height: 32,
                         child: TextField(
                           controller: _categorySearchController,
-                          onChanged: (val) => setState(() => _categorySearchQuery = val.trim()),
+                          onChanged: (val) => setState(() => _categorySearchQuery = val),
                           style: const TextStyle(color: Colors.white, fontSize: 12),
                           decoration: InputDecoration(
-                            hintText: 'Search categories…',
-                            hintStyle: const TextStyle(color: Colors.white24, fontSize: 12),
-                            prefixIcon: const Icon(Icons.search_rounded, size: 14, color: Colors.white24),
+                            hintText: 'Filter categories…',
+                            hintStyle: const TextStyle(color: Colors.white30, fontSize: 12),
+                            prefixIcon: const Icon(Icons.search, size: 14, color: Colors.white38),
                             prefixIconConstraints: const BoxConstraints(minWidth: 28),
                             suffixIcon: _categorySearchQuery.isNotEmpty
                                 ? GestureDetector(
@@ -233,10 +349,9 @@ class _MoviesScreenState extends ConsumerState<MoviesScreen> {
                                       _categorySearchController.clear();
                                       setState(() => _categorySearchQuery = '');
                                     },
-                                    child: const Icon(Icons.close_rounded, size: 14, color: Colors.white24),
+                                    child: const Icon(Icons.clear, size: 14, color: Colors.white54),
                                   )
                                 : null,
-                            suffixIconConstraints: const BoxConstraints(minWidth: 28),
                             filled: true,
                             fillColor: Colors.white.withValues(alpha: 0.05),
                             contentPadding: const EdgeInsets.symmetric(horizontal: 8),
@@ -260,26 +375,26 @@ class _MoviesScreenState extends ConsumerState<MoviesScreen> {
                               title: 'Recently Viewed',
                               count: recentCount,
                               isSelected: _selectedCategory == 'Recently Viewed',
-                              onTap: () => setState(() => _selectedCategory = 'Recently Viewed'),
+                              onTap: () => _selectCategory('Recently Viewed'),
                             ),
                           _buildVodCategoryItem(
                             title: 'All',
-                            count: allCount,
+                            count: _allCount,
                             isSelected: _selectedCategory == 'All',
-                            onTap: () => setState(() => _selectedCategory = 'All'),
+                            onTap: () => _selectCategory('All'),
                           ),
                           _buildVodCategoryItem(
                             title: 'Favorites',
-                            count: favCount,
+                            count: _favCount,
                             isSelected: _selectedCategory == 'Favorites',
-                            onTap: () => setState(() => _selectedCategory = 'Favorites'),
+                            onTap: () => _selectCategory('Favorites'),
                           ),
                           for (final group in visibleGroups)
                             _buildVodCategoryItem(
                               title: group,
-                              count: categoryCounts[group] ?? 0,
+                              count: _categoryCounts[group] ?? 0,
                               isSelected: _selectedCategory == group,
-                              onTap: () => setState(() => _selectedCategory = group),
+                              onTap: () => _selectCategory(group),
                             ),
                         ],
                       ),
@@ -292,9 +407,9 @@ class _MoviesScreenState extends ConsumerState<MoviesScreen> {
               Expanded(
                 child: Column(
                   children: [
-                    _buildTopToolbar(filtered.length),
+                    _buildTopToolbar(_categoryCounts[_selectedCategory] ?? (_selectedCategory == 'All' ? _allCount : _movies.length)),
                     Expanded(
-                      child: filtered.isEmpty
+                      child: _movies.isEmpty && !_loadingMovies
                           ? const Center(
                               child: Text(
                                 'No movies found in this category',
@@ -302,6 +417,7 @@ class _MoviesScreenState extends ConsumerState<MoviesScreen> {
                               ),
                             )
                           : GridView.builder(
+                              controller: _scrollController,
                               padding: const EdgeInsets.all(20),
                               gridDelegate:
                                   const SliverGridDelegateWithMaxCrossAxisExtent(
@@ -310,9 +426,17 @@ class _MoviesScreenState extends ConsumerState<MoviesScreen> {
                                 crossAxisSpacing: 16,
                                 mainAxisSpacing: 16,
                               ),
-                              itemCount: filtered.length,
+                              itemCount: _movies.length + (_loadingMovies ? 1 : 0),
                               itemBuilder: (context, index) {
-                                final movie = filtered[index];
+                                if (index == _movies.length) {
+                                  return const Center(
+                                    child: Padding(
+                                      padding: EdgeInsets.all(16.0),
+                                      child: CircularProgressIndicator(color: Color(0xFF6C5CE7)),
+                                    ),
+                                  );
+                                }
+                                final movie = _movies[index];
                                 final historyItem = history
                                     .where((h) => h.id == movie.id)
                                     .firstOrNull;
@@ -330,8 +454,6 @@ class _MoviesScreenState extends ConsumerState<MoviesScreen> {
             ],
           );
         },
-      );
-        },
       ),
     );
   }
@@ -343,7 +465,7 @@ class _MoviesScreenState extends ConsumerState<MoviesScreen> {
     int allCount,
     int favCount,
     int recentCount,
-    List<db.Channel> filtered,
+    List<db.Channel> movies,
     List<WatchHistoryItem> history,
     BoxConstraints constraints,
   ) {
@@ -383,7 +505,7 @@ class _MoviesScreenState extends ConsumerState<MoviesScreen> {
                       height: 36,
                       child: TextField(
                         controller: _searchController,
-                        onChanged: (val) => setState(() => _searchQuery = val),
+                        onChanged: _onSearchChanged,
                         style: const TextStyle(color: Colors.white, fontSize: 13),
                         decoration: InputDecoration(
                           hintText: 'Search movies…',
@@ -394,7 +516,7 @@ class _MoviesScreenState extends ConsumerState<MoviesScreen> {
                               ? GestureDetector(
                                   onTap: () {
                                     _searchController.clear();
-                                    setState(() => _searchQuery = '');
+                                    _onSearchChanged('');
                                   },
                                   child: const Icon(Icons.clear, size: 16, color: Colors.white54),
                                 )
@@ -436,7 +558,7 @@ class _MoviesScreenState extends ConsumerState<MoviesScreen> {
                           DropdownMenuItem(value: MovieSortOption.year, child: Text('Year', style: TextStyle(color: Colors.white, fontSize: 12))),
                         ],
                         onChanged: (val) {
-                          if (val != null) setState(() => _sortOption = val);
+                          if (val != null) _onSortChanged(val);
                         },
                       ),
                     ),
@@ -464,7 +586,7 @@ class _MoviesScreenState extends ConsumerState<MoviesScreen> {
                   return Padding(
                     padding: const EdgeInsets.only(right: 6),
                     child: InkWell(
-                      onTap: () => setState(() => _selectedCategory = title),
+                      onTap: () => _selectCategory(title),
                       borderRadius: BorderRadius.circular(16),
                       child: Container(
                         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
@@ -510,7 +632,7 @@ class _MoviesScreenState extends ConsumerState<MoviesScreen> {
 
             // Main Movie Grid (Full Screen Width)
             Expanded(
-              child: filtered.isEmpty
+              child: movies.isEmpty && !_loadingMovies
                   ? const Center(
                       child: Text(
                         'No movies found in this category',
@@ -518,6 +640,7 @@ class _MoviesScreenState extends ConsumerState<MoviesScreen> {
                       ),
                     )
                   : GridView.builder(
+                      controller: _scrollController,
                       padding: const EdgeInsets.all(10),
                       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                         crossAxisCount: crossAxisCount,
@@ -525,9 +648,17 @@ class _MoviesScreenState extends ConsumerState<MoviesScreen> {
                         crossAxisSpacing: 10,
                         mainAxisSpacing: 10,
                       ),
-                      itemCount: filtered.length,
+                      itemCount: movies.length + (_loadingMovies ? 1 : 0),
                       itemBuilder: (context, index) {
-                        final movie = filtered[index];
+                        if (index == movies.length) {
+                          return const Center(
+                            child: Padding(
+                              padding: EdgeInsets.all(16.0),
+                              child: CircularProgressIndicator(color: Color(0xFF6C5CE7)),
+                            ),
+                          );
+                        }
+                        final movie = movies[index];
                         final historyItem = history
                             .where((h) => h.id == movie.id)
                             .firstOrNull;
@@ -545,7 +676,7 @@ class _MoviesScreenState extends ConsumerState<MoviesScreen> {
     );
   }
 
-  Widget _buildVodCategoryItem({
+    Widget _buildVodCategoryItem({
     required String title,
     required int count,
     required bool isSelected,
@@ -626,7 +757,7 @@ class _MoviesScreenState extends ConsumerState<MoviesScreen> {
                   DropdownMenuItem(value: MovieSortOption.year, child: Text('Sort by Year')),
                 ],
                 onChanged: (val) {
-                  if (val != null) setState(() => _sortOption = val);
+                  if (val != null) _onSortChanged(val);
                 },
               ),
             ),
@@ -638,7 +769,7 @@ class _MoviesScreenState extends ConsumerState<MoviesScreen> {
             height: 34,
             child: TextField(
               controller: _searchController,
-              onChanged: (val) => setState(() => _searchQuery = val),
+              onChanged: _onSearchChanged,
               style: const TextStyle(color: Colors.white, fontSize: 12),
               decoration: InputDecoration(
                 hintText: 'Search in $_selectedCategory…',
@@ -649,7 +780,7 @@ class _MoviesScreenState extends ConsumerState<MoviesScreen> {
                         icon: const Icon(Icons.clear, size: 14, color: Colors.white54),
                         onPressed: () {
                           _searchController.clear();
-                          setState(() => _searchQuery = '');
+                          _onSearchChanged('');
                         },
                       )
                     : null,

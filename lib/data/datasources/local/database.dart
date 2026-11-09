@@ -42,6 +42,9 @@ class AppDatabase extends _$AppDatabase {
           await customStatement('PRAGMA synchronous = NORMAL;');
           await customStatement('CREATE INDEX IF NOT EXISTS idx_channels_provider_stream ON channels(provider_id, stream_type);');
           await customStatement('CREATE INDEX IF NOT EXISTS idx_channels_group ON channels(provider_id, group_title);');
+          await customStatement('CREATE INDEX IF NOT EXISTS idx_channels_prov_strm_sort ON channels(provider_id, stream_type, sort_order);');
+          await customStatement('CREATE INDEX IF NOT EXISTS idx_channels_strm_sort ON channels(stream_type, sort_order);');
+          await customStatement('CREATE INDEX IF NOT EXISTS idx_channels_prov_strm_grp_sort ON channels(provider_id, stream_type, group_title, sort_order);');
           await customStatement('CREATE INDEX IF NOT EXISTS idx_epg_prog_range ON epg_programmes(epg_channel_id, start, stop);');
           // Purge any orphaned channels from deleted providers
           await customStatement('DELETE FROM channels WHERE provider_id NOT IN (SELECT id FROM providers);');
@@ -209,6 +212,118 @@ class AppDatabase extends _$AppDatabase {
       result[g] = c;
     }
     return result;
+  }
+
+  Future<int> getVodTotalCount({String? providerId}) async {
+    final sql = providerId != null
+        ? 'SELECT COUNT(*) as cnt FROM channels WHERE provider_id = ? AND stream_type = \'vod\''
+        : 'SELECT COUNT(*) as cnt FROM channels WHERE stream_type = \'vod\'';
+    final rows = await customSelect(
+      sql,
+      variables: providerId != null ? [Variable.withString(providerId)] : const [],
+    ).get();
+    return rows.isNotEmpty ? rows.first.read<int>('cnt') : 0;
+  }
+
+  Future<int> getSeriesTotalCount({String? providerId}) async {
+    final sql = providerId != null
+        ? 'SELECT COUNT(*) as cnt FROM channels WHERE provider_id = ? AND stream_type = \'series\''
+        : 'SELECT COUNT(*) as cnt FROM channels WHERE stream_type = \'series\'';
+    final rows = await customSelect(
+      sql,
+      variables: providerId != null ? [Variable.withString(providerId)] : const [],
+    ).get();
+    return rows.isNotEmpty ? rows.first.read<int>('cnt') : 0;
+  }
+
+  Future<int> getVodFavoriteCount({String? providerId}) async {
+    final sql = providerId != null
+        ? 'SELECT COUNT(*) as cnt FROM channels WHERE provider_id = ? AND stream_type = \'vod\' AND favorite = 1'
+        : 'SELECT COUNT(*) as cnt FROM channels WHERE stream_type = \'vod\' AND favorite = 1';
+    final rows = await customSelect(
+      sql,
+      variables: providerId != null ? [Variable.withString(providerId)] : const [],
+    ).get();
+    return rows.isNotEmpty ? rows.first.read<int>('cnt') : 0;
+  }
+
+  Future<int> getSeriesFavoriteCount({String? providerId}) async {
+    final sql = providerId != null
+        ? 'SELECT COUNT(*) as cnt FROM channels WHERE provider_id = ? AND stream_type = \'series\' AND favorite = 1'
+        : 'SELECT COUNT(*) as cnt FROM channels WHERE stream_type = \'series\' AND favorite = 1';
+    final rows = await customSelect(
+      sql,
+      variables: providerId != null ? [Variable.withString(providerId)] : const [],
+    ).get();
+    return rows.isNotEmpty ? rows.first.read<int>('cnt') : 0;
+  }
+
+  Future<List<Channel>> getVodMoviesPaged({
+    String? providerId,
+    String? groupTitle,
+    String? searchQuery,
+    bool favoritesOnly = false,
+    int limit = 120,
+    int offset = 0,
+    String sortBy = 'recent',
+  }) async {
+    final query = select(channels);
+    query.where((t) => t.streamType.equals('vod'));
+    if (providerId != null && providerId.isNotEmpty) {
+      query.where((t) => t.providerId.equals(providerId));
+    }
+    if (favoritesOnly) {
+      query.where((t) => t.favorite.equals(true));
+    } else if (groupTitle != null && groupTitle.isNotEmpty && groupTitle != 'All') {
+      query.where((t) => t.groupTitle.equals(groupTitle));
+    }
+    if (searchQuery != null && searchQuery.trim().isNotEmpty) {
+      final q = '%${searchQuery.trim().toLowerCase()}%';
+      query.where((t) => t.name.lower().like(q));
+    }
+    if (sortBy == 'alphabetical') {
+      query.orderBy([(t) => OrderingTerm(expression: t.name)]);
+    } else if (sortBy == 'year') {
+      query.orderBy([(t) => OrderingTerm(expression: t.name, mode: OrderingMode.desc)]);
+    } else {
+      query.orderBy([(t) => OrderingTerm(expression: t.sortOrder)]);
+    }
+    query.limit(limit, offset: offset);
+    return query.get();
+  }
+
+  Future<List<Channel>> getSeriesPaged({
+    String? providerId,
+    String? groupTitle,
+    String? searchQuery,
+    bool favoritesOnly = false,
+    int limit = 120,
+    int offset = 0,
+    String sortBy = 'recent',
+  }) async {
+    final query = select(channels);
+    query.where((t) => t.streamType.equals('series'));
+    if (providerId != null && providerId.isNotEmpty) {
+      query.where((t) => t.providerId.equals(providerId));
+    }
+    if (favoritesOnly) {
+      query.where((t) => t.favorite.equals(true));
+    } else if (groupTitle != null && groupTitle.isNotEmpty && groupTitle != 'All') {
+      query.where((t) => t.groupTitle.equals(groupTitle));
+    }
+    if (searchQuery != null && searchQuery.trim().isNotEmpty) {
+      final q = '%${searchQuery.trim().toLowerCase()}%';
+      query.where((t) => t.name.lower().like(q));
+    }
+    if (sortBy == 'alphabetical') {
+      query.orderBy([(t) => OrderingTerm(expression: t.name)]);
+    } else if (sortBy == 'year') {
+      query.orderBy([(t) => OrderingTerm(expression: t.name, mode: OrderingMode.desc)]);
+    } else {
+      query.orderBy([(t) => OrderingTerm(expression: t.sortOrder)]);
+    }
+    query.limit(limit, offset: offset);
+    return query.get();
   }
 
   /// Get channels for a specific provider and group.
