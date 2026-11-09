@@ -26,6 +26,7 @@ class _MovieDetailScreenState extends ConsumerState<MovieDetailScreen> {
   Map<String, dynamic>? _xtreamInfo;
   bool _loading = true;
   late bool _isFavorite;
+  String? _resolvedStreamUrl;
 
   @override
   void initState() {
@@ -127,6 +128,12 @@ class _MovieDetailScreenState extends ConsumerState<MovieDetailScreen> {
           xtreamInfo = res['info'] as Map<String, dynamic>;
           tmdbId = xtreamInfo['tmdb_id']?.toString();
         }
+        final movieData = res['movie_data'] is Map<String, dynamic> ? res['movie_data'] as Map<String, dynamic> : null;
+        final ext = (movieData?['container_extension'] as String?) ??
+                    (xtreamInfo?['container_extension'] as String?) ??
+                    'mp4';
+        final cleanBase = baseUrl.endsWith('/') ? baseUrl.substring(0, baseUrl.length - 1) : baseUrl;
+        _resolvedStreamUrl = '$cleanBase/movie/$username/$password/$vodId.$ext';
       }
     } catch (_) {}
 
@@ -210,9 +217,13 @@ class _MovieDetailScreenState extends ConsumerState<MovieDetailScreen> {
             ? (_xtreamInfo!['backdrop_path'] as List).first as String?
             : null);
 
+    final playUrl = (_resolvedStreamUrl != null && _resolvedStreamUrl!.isNotEmpty)
+        ? _resolvedStreamUrl!
+        : widget.movie.streamUrl;
+
     context.push('/vod-player', extra: {
       'id': widget.movie.id,
-      'streamUrl': widget.movie.streamUrl,
+      'streamUrl': playUrl,
       'streamType': 'vod',
       'title': widget.movie.name,
       'posterUrl': poster,

@@ -139,22 +139,33 @@ class _SeriesDetailScreenState extends ConsumerState<SeriesDetailScreen> {
 
         final episodesMap = info['episodes'];
         if (episodesMap is Map) {
+          final cleanBase = baseUrl.endsWith('/') ? baseUrl.substring(0, baseUrl.length - 1) : baseUrl;
           episodesMap.forEach((seasonKey, epList) {
             final sNum = int.tryParse('$seasonKey') ?? 1;
             final seasonEps = <TmdbEpisode>[];
             if (epList is List) {
-              for (final ep in epList) {
+              for (int idx = 0; idx < epList.length; idx++) {
+                final ep = epList[idx];
                 if (ep is Map) {
                   final eNum = ep['episode_num'] is int
                       ? ep['episode_num'] as int
-                      : int.tryParse('${ep['episode_num']}') ?? 1;
+                      : int.tryParse('${ep['episode_num']}') ?? (idx + 1);
                   final epId = ep['id'];
                   final ext = ep['container_extension'] as String? ?? 'mp4';
                   final title = ep['title'] as String? ?? 'Episode $eNum';
-                  final streamUrl = '$baseUrl/series/$username/$password/$epId.$ext';
+                  final streamUrl = '$cleanBase/series/$username/$password/$epId.$ext';
                   _episodeStreamUrls['${sNum}_$eNum'] = streamUrl;
+                  _episodeStreamUrls['${sNum}_${idx + 1}'] = streamUrl;
+                  if (sNum == 1) {
+                    _episodeStreamUrls['$eNum'] = streamUrl;
+                    _episodeStreamUrls['${idx + 1}'] = streamUrl;
+                  }
+                  if (epId != null) {
+                    _episodeStreamUrls['id_$epId'] = streamUrl;
+                  }
 
                   seasonEps.add(TmdbEpisode(
+                    id: int.tryParse('$epId'),
                     episodeNumber: eNum,
                     seasonNumber: sNum,
                     name: title,
@@ -258,12 +269,51 @@ class _SeriesDetailScreenState extends ConsumerState<SeriesDetailScreen> {
     final historyItem = history.where((h) => h.id == epId).firstOrNull;
     final pos = startOver ? 0 : (historyItem?.positionMs ?? 0);
 
-    final xtreamUrl = _episodeStreamUrls['${ep.seasonNumber}_${ep.episodeNumber}'];
+    // Look up by season_episode, then by ep.id, then fallback to first available
+    String? xtreamUrl = _episodeStreamUrls['${ep.seasonNumber}_${ep.episodeNumber}'];
+    if (xtreamUrl == null && ep.id != null) {
+      xtreamUrl = _episodeStreamUrls['id_${ep.id}'];
+    }
+    if (xtreamUrl == null) {
+      xtreamUrl = _episodeStreamUrls['${ep.episodeNumber}'];
+    }
+
     final url = (xtreamUrl != null && xtreamUrl.isNotEmpty)
         ? xtreamUrl
         : (widget.series.streamUrl.isNotEmpty
             ? widget.series.streamUrl
-            : '');
+            : (_episodeStreamUrls.isNotEmpty ? _episodeStreamUrls.values.first : ''));
+
+    // Prepare next episode if available in current season
+    Map<String, dynamic>? nextEpData;
+    if (_seasonDetail != null && _seasonDetail!.episodes.isNotEmpty) {
+      final curIdx = _seasonDetail!.episodes.indexWhere(
+        (e) => e.seasonNumber == ep.seasonNumber && e.episodeNumber == ep.episodeNumber,
+      );
+      if (curIdx >= 0 && curIdx < _seasonDetail!.episodes.length - 1) {
+        final nextEp = _seasonDetail!.episodes[curIdx + 1];
+        String? nextUrl = _episodeStreamUrls['${nextEp.seasonNumber}_${nextEp.episodeNumber}'];
+        if (nextUrl == null && nextEp.id != null) {
+          nextUrl = _episodeStreamUrls['id_${nextEp.id}'];
+        }
+        if (nextUrl == null) {
+          nextUrl = _episodeStreamUrls['${nextEp.episodeNumber}'];
+        }
+        if (nextUrl != null && nextUrl.isNotEmpty) {
+          nextEpData = {
+            'id': '${widget.series.id}_s${nextEp.seasonNumber}_e${nextEp.episodeNumber}',
+            'streamUrl': nextUrl,
+            'title': '${widget.series.name} • S${nextEp.seasonNumber}E${nextEp.episodeNumber} - ${nextEp.name}',
+            'posterUrl': nextEp.stillUrl.isNotEmpty ? nextEp.stillUrl : widget.series.tvgLogo,
+            'backdropUrl': _tmdbDetail?.backdropUrl,
+            'seriesName': widget.series.name,
+            'seasonNumber': nextEp.seasonNumber,
+            'episodeNumber': nextEp.episodeNumber,
+            'episodeTitle': nextEp.name,
+          };
+        }
+      }
+    }
 
     context.push('/vod-player', extra: {
       'id': epId,
@@ -277,6 +327,7 @@ class _SeriesDetailScreenState extends ConsumerState<SeriesDetailScreen> {
       'seasonNumber': ep.seasonNumber,
       'episodeNumber': ep.episodeNumber,
       'episodeTitle': ep.name,
+      'nextEpisode': nextEpData,
     });
   }
 

@@ -9,7 +9,7 @@ import 'package:media_kit_video/media_kit_video.dart';
 import '../../data/services/app_settings.dart';
 import '../../data/services/pip_service.dart';
 import '../../data/services/playback_history_service.dart';
-import '../player/player_service.dart';
+import '../player/active_player_registry.dart';
 import '../player/track_selection_hud.dart';
 
 class VodPlayerScreen extends ConsumerStatefulWidget {
@@ -101,14 +101,14 @@ class _VodPlayerScreenState extends ConsumerState<VodPlayerScreen> {
     _currentEpisodeTitle = widget.episodeTitle;
     _currentNextEpisode = widget.nextEpisode;
 
+    _player = Player();
+    ActivePlayerRegistry.register(_player);
+    _videoController = VideoController(_player);
+
     _initPlayer();
   }
 
   void _initPlayer() async {
-    final playerService = ref.read(playerServiceProvider);
-    _player = playerService.player;
-    _videoController = playerService.videoController;
-
     final settings = ref.read(appSettingsProvider);
     final useHwAcc = settings.hardwareAcceleration;
 
@@ -189,7 +189,12 @@ class _VodPlayerScreenState extends ConsumerState<VodPlayerScreen> {
 
     _subscriptions.add(_player.stream.completed.listen((completed) {
       if (completed && mounted) {
-        _handleStreamCompleted();
+        // Only trigger completion if the video actually loaded and reached near the end.
+        // Prevents stale completion events from previous stream/stop() calls from aborting playback.
+        if (_duration > const Duration(seconds: 10) &&
+            _position >= _duration - const Duration(seconds: 5)) {
+          _handleStreamCompleted();
+        }
       }
     }));
   }
@@ -233,14 +238,20 @@ class _VodPlayerScreenState extends ConsumerState<VodPlayerScreen> {
     }
 
     try {
+      await _player.setVolume(100.0);
       await _player.open(Media(
         url,
         httpHeaders: const {
           'User-Agent': 'IPTVSmartersPro/1.0.0 (Linux; Android 12)',
         },
       ));
-      if (initialMs > 0) {
-        await _player.seek(Duration(milliseconds: initialMs));
+      if (initialMs > 1000) {
+        // Wait for media duration to load before seeking to avoid seeking beyond 0 / EOF
+        _player.stream.duration.firstWhere((d) => d > Duration.zero).then((dur) async {
+          if (mounted && initialMs < dur.inMilliseconds - 2000) {
+            await _player.seek(Duration(milliseconds: initialMs));
+          }
+        }).catchError((_) {});
       }
     } catch (e) {
       if (mounted) {
@@ -369,7 +380,9 @@ class _VodPlayerScreenState extends ConsumerState<VodPlayerScreen> {
     _overlayTimer?.cancel();
     _countdownTimer?.cancel();
     _saveCurrentProgress();
+    ActivePlayerRegistry.unregister(_player);
     _player.stop();
+    _player.dispose();
     super.dispose();
   }
 

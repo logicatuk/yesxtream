@@ -372,6 +372,7 @@ class TmdbSeasonDetail {
 
 /// A single TMDB episode
 class TmdbEpisode {
+  final int? id;
   final int episodeNumber;
   final int seasonNumber;
   final String? name;
@@ -381,6 +382,7 @@ class TmdbEpisode {
   final String? airDate;
 
   const TmdbEpisode({
+    this.id,
     required this.episodeNumber,
     required this.seasonNumber,
     this.name,
@@ -394,6 +396,7 @@ class TmdbEpisode {
 
   factory TmdbEpisode.fromJson(Map<String, dynamic> json) {
     return TmdbEpisode(
+      id: json['id'] as int?,
       episodeNumber: json['episode_number'] as int,
       seasonNumber: json['season_number'] as int,
       name: json['name'] as String?,

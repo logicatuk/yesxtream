@@ -158,7 +158,7 @@ GoRouter createRouter() {
             episodeNumber: extra['episodeNumber'] as int?,
             episodeTitle: extra['episodeTitle'] as String?,
             nextEpisode: extra['nextEpisode'] as Map<String, dynamic>?,
-            initialPositionMs: extra['initialPositionMs'] as int? ?? 0,
+            initialPositionMs: (extra['initialPositionMs'] as int?) ?? (extra['position'] as int?) ?? 0,
           ),
         );
       },
