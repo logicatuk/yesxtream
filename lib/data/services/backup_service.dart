@@ -13,10 +13,6 @@ final _log = Logger(printer: SimplePrinter());
 
 /// Keys in SharedPreferences to include in backup.
 const _backupPrefKeys = [
-  'shows_trakt_client_id',
-  'shows_tmdb_api_key',
-  'shows_debrid_tokens',
-  'shows_favorites',
   'last_group',
   'last_channel_id',
   'failover_enabled',
@@ -25,7 +21,6 @@ const _backupPrefKeys = [
 /// Prefix patterns for dynamic keys to back up.
 const _backupPrefPrefixes = [
   'lg_webos_key_',
-  'show_last_season_',
 ];
 
 /// Creates and restores `.clubtivi` backup files (ZIP archive) containing

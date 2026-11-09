@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import '../data/datasources/local/database.dart' as db;
-import '../data/models/show.dart';
 import '../features/catchup/catchup_screen.dart';
 import '../features/channels/channels_screen.dart';
 import '../features/continue_watching/continue_watching_screen.dart';
@@ -14,10 +13,7 @@ import '../features/navigation/yes_shell.dart';
 import '../features/player/player_screen.dart';
 import '../features/playlists/playlist_manager_screen.dart';
 import '../features/search/search_screen.dart';
-import '../features/settings/debrid_services_screen.dart';
 import '../features/settings/settings_screen.dart';
-import '../features/shows/show_detail_screen.dart';
-import '../features/shows/shows_screen.dart';
 import '../features/splash/splash_screen.dart';
 import '../features/vod/movie_detail_screen.dart';
 import '../features/vod/movies_screen.dart';
@@ -95,10 +91,6 @@ GoRouter createRouter() {
     GoRoute(
       path: '/epg-mapping',
       builder: (context, state) => const EpgMappingScreen(),
-    ),
-    GoRoute(
-      path: '/debrid-services',
-      builder: (context, state) => const DebridServicesScreen(),
     ),
   ];
 
@@ -217,20 +209,6 @@ GoRouter createRouter() {
           key: UniqueKey(),
           child: SeriesDetailScreen(series: series),
         );
-      },
-    ),
-    GoRoute(
-      parentNavigatorKey: rootNavigatorKey,
-      path: '/shows',
-      builder: (context, state) => const ShowsScreen(),
-    ),
-    GoRoute(
-      parentNavigatorKey: rootNavigatorKey,
-      path: '/shows/:id',
-      builder: (context, state) {
-        final traktId = int.tryParse(state.pathParameters['id'] ?? '') ?? 0;
-        final show = state.extra as Show?;
-        return ShowDetailScreen(traktId: traktId, initialShow: show);
       },
     ),
   ];

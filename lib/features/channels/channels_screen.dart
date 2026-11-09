@@ -28,7 +28,6 @@ import '../player/stream_info_badges.dart';
 import '../playlists/playlist_providers.dart';
 import '../providers/provider_manager.dart';
 import '../../data/datasources/remote/xtream_client.dart';
-import '../shows/shows_providers.dart';
 import 'channel_debug_dialog.dart';
 
 class ChannelsScreen extends ConsumerStatefulWidget {
@@ -1306,12 +1305,9 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
     if (_imdbIdCache.containsKey(key)) return;
     _imdbIdCache[key] = null; // mark in-progress
     try {
-      final keys = ref.read(showsApiKeysProvider);
-      if (!keys.hasTmdbKey) return;
-      final tmdb = TmdbClient(apiKey: keys.tmdbApiKey);
-      final results = await tmdb.searchTv(title);
+      final results = await TmdbClient.defaultClient.searchTv(title);
       if (results.isEmpty) return;
-      final detail = await tmdb.getTvShow(results.first.id);
+      final detail = await TmdbClient.defaultClient.getTvShow(results.first.id);
       if (detail.imdbId != null && detail.imdbId!.isNotEmpty) {
         _imdbIdCache[key] = detail.imdbId;
         if (mounted) setState(() {});
@@ -3730,7 +3726,7 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
         _playLocalFile();
         break;
       case 'shows':
-        context.push('/shows');
+        context.push('/series');
         break;
       case 'play_url':
         _playUrlStream();
