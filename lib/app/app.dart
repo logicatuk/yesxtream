@@ -1,5 +1,6 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/platform_info.dart';
@@ -22,7 +23,12 @@ class _YesXtreamAppState extends ConsumerState<YesXtreamApp> {
   @override
   void initState() {
     super.initState();
+    // Maintain true fullscreen immersive sticky mode across app lifecycle
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     _lifecycleListener = AppLifecycleListener(
+      onResume: () {
+        SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+      },
       onExitRequested: _handleExitRequested,
       onDetach: _handleDetach,
     );

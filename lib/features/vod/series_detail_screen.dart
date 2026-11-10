@@ -251,23 +251,23 @@ class _SeriesDetailScreenState extends ConsumerState<SeriesDetailScreen> {
       _selectedEpisode = null;
     });
 
+    TmdbSeasonDetail? season;
     if (_tmdbDetail != null) {
-      final season = await TmdbClient.defaultClient.getCachedTvSeason(
+      season = await TmdbClient.defaultClient.getCachedTvSeason(
         _tmdbDetail!.id,
         seasonNum,
       );
-      if (mounted) setState(() => _seasonDetail = season);
-    } else if (_xtreamFallbackEpisodes.containsKey(seasonNum)) {
-      if (mounted) {
-        setState(() {
-          _seasonDetail = TmdbSeasonDetail(
-            id: seasonNum,
-            seasonNumber: seasonNum,
-            name: 'Season $seasonNum',
-            episodes: _xtreamFallbackEpisodes[seasonNum] ?? [],
-          );
-        });
-      }
+    }
+    if ((season == null || season.episodes.isEmpty) && _xtreamFallbackEpisodes.containsKey(seasonNum)) {
+      season = TmdbSeasonDetail(
+        id: seasonNum,
+        seasonNumber: seasonNum,
+        name: 'Season $seasonNum',
+        episodes: _xtreamFallbackEpisodes[seasonNum] ?? [],
+      );
+    }
+    if (mounted) {
+      setState(() => _seasonDetail = season);
     }
   }
 
@@ -477,6 +477,10 @@ class _SeriesDetailScreenState extends ConsumerState<SeriesDetailScreen> {
           ),
 
           SafeArea(
+            left: false,
+            right: false,
+            top: false,
+            bottom: false,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -490,7 +494,7 @@ class _SeriesDetailScreenState extends ConsumerState<SeriesDetailScreen> {
                 Expanded(
                   child: LayoutBuilder(
                     builder: (context, constraints) {
-                      final isMobile = constraints.maxWidth < 800;
+                      final isPortrait = constraints.maxHeight >= constraints.maxWidth;
 
                       Widget buildEpisodeCard(TmdbEpisode ep) {
                         final isSelected = ep.episodeNumber == _selectedEpisode?.episodeNumber;
@@ -507,7 +511,7 @@ class _SeriesDetailScreenState extends ConsumerState<SeriesDetailScreen> {
                           },
                           borderRadius: BorderRadius.circular(12),
                           child: Container(
-                            padding: const EdgeInsets.all(12),
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                             decoration: BoxDecoration(
                               color: isSelected
                                   ? const Color(0xFF6C5CE7).withValues(alpha: 0.15)
@@ -523,8 +527,8 @@ class _SeriesDetailScreenState extends ConsumerState<SeriesDetailScreen> {
                               children: [
                                 // Thumbnail with fallback
                                 Container(
-                                  width: 100,
-                                  height: 60,
+                                  width: 86,
+                                  height: 54,
                                   decoration: BoxDecoration(
                                     borderRadius: BorderRadius.circular(8),
                                     color: const Color(0xFF1E1E2E),
@@ -850,36 +854,8 @@ class _SeriesDetailScreenState extends ConsumerState<SeriesDetailScreen> {
                         );
                       }
 
-                      final isShortLandscape = constraints.maxHeight < 520 &&
-                          constraints.maxWidth > constraints.maxHeight;
-
-                      // ── Landscape Phone Layout (Wide & Short: e.g. 800x380) ──
-                      // Eliminates pinned header; gives episode list 100% full height to scroll freely!
-                      if (isShortLandscape) {
-                        return Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            // Left: Compact Overview (width: 250-280)
-                            SizedBox(
-                              width: constraints.maxWidth < 700 ? 230 : 270,
-                              child: buildOverviewDetails(includePoster: true, isCompact: true),
-                            ),
-                            // Right: Full-height Season Selector & Episodes
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  buildSeasonSelector(),
-                                  Expanded(child: buildEpisodesList()),
-                                ],
-                              ),
-                            ),
-                          ],
-                        );
-                      }
-
-                      // ── Portrait Mobile Responsive Layout (< 800px) ──
-                      if (isMobile) {
+                      // ── Portrait Mobile / Foldable Responsive Layout ──
+                      if (isPortrait) {
                         final epCount = _seasonDetail?.episodes.length ?? 0;
 
                         return DefaultTabController(
@@ -1027,7 +1003,7 @@ class _SeriesDetailScreenState extends ConsumerState<SeriesDetailScreen> {
                               Expanded(
                                 child: TabBarView(
                                   children: [
-                                    // Tab 1: Episodes
+                                    // Tab 1: Episodes (Full width)
                                     Column(
                                       crossAxisAlignment: CrossAxisAlignment.start,
                                       children: [
@@ -1035,7 +1011,7 @@ class _SeriesDetailScreenState extends ConsumerState<SeriesDetailScreen> {
                                         Expanded(child: buildEpisodesList()),
                                       ],
                                     ),
-                                    // Tab 2: Overview & Cast
+                                    // Tab 2: Overview & Cast (Full width)
                                     buildOverviewDetails(includePoster: false),
                                   ],
                                 ),
@@ -1045,16 +1021,23 @@ class _SeriesDetailScreenState extends ConsumerState<SeriesDetailScreen> {
                         );
                       }
 
-                      // ── Desktop / Tablet Side-by-Side Layout (>= 800px) ──
+                      // ── Landscape Layout (Side-by-Side: Phones, Tablets, Desktop TV) ──
+                      // Left: Overview with Poster (width scaled nicely)
+                      // Right: Full-height Season Selector & Episodes with 100% scrollable freedom!
+                      final isShortLandscape = constraints.maxHeight < 520;
+                      final leftWidth = isShortLandscape
+                          ? (constraints.maxWidth < 750 ? 240.0 : 280.0)
+                          : (constraints.maxWidth < 950 ? 300.0 : 360.0);
+
                       return Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           // Left Overview
                           SizedBox(
-                            width: 360,
-                            child: buildOverviewDetails(includePoster: true),
+                            width: leftWidth,
+                            child: buildOverviewDetails(includePoster: true, isCompact: isShortLandscape),
                           ),
-                          // Right Episodes
+                          // Right Episodes (Fully scrollable)
                           Expanded(
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,

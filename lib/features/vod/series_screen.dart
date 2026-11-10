@@ -455,6 +455,10 @@ class _SeriesScreenState extends ConsumerState<SeriesScreen> {
     return Scaffold(
       backgroundColor: const Color(0xFF0A0A0F),
       body: SafeArea(
+        left: false,
+        right: false,
+        top: false,
+        bottom: false,
         child: Column(
           children: [
             // Compact Header: Back, Search, Sort

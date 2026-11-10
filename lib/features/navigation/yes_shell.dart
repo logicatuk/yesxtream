@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
+import '../../core/platform_info.dart';
 import '../../data/services/app_settings.dart';
 import '../player/player_service.dart';
 import '../playlists/playlist_providers.dart';
@@ -65,7 +66,7 @@ class _YesShellState extends ConsumerState<YesShell> {
       ),
       child: LayoutBuilder(
         builder: (context, constraints) {
-          final isCompact = constraints.maxWidth < 700;
+          final isCompact = constraints.maxWidth < 960 || PlatformInfo.isMobile;
           final isVeryCompact = constraints.maxWidth < 500;
 
           return Row(

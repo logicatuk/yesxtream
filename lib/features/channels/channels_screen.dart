@@ -1566,6 +1566,10 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
             body: Stack(
               children: [
                 SafeArea(
+                  left: false,
+                  right: false,
+                  top: false,
+                  bottom: false,
                   child: LayoutBuilder(
                     builder: (context, constraints) {
                       final isCompact = constraints.maxWidth < 750;
@@ -1666,6 +1670,10 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
   Widget _buildEmptyState(BuildContext context) {
     return Scaffold(
       body: SafeArea(
+        left: false,
+        right: false,
+        top: false,
+        bottom: false,
         child: Column(
           children: [
             if (!PlatformInfo.isAndroid) _buildTopBar(context),

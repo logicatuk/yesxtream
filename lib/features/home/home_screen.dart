@@ -113,10 +113,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
               // ── Main Layout ──
               SafeArea(
+                left: false,
+                right: false,
+                top: false,
+                bottom: false,
                 child: LayoutBuilder(
                   builder: (context, constraints) {
-                    final isLandscape = constraints.maxWidth > constraints.maxHeight &&
-                        constraints.maxWidth >= 550;
+                    final isLandscape = constraints.maxWidth > constraints.maxHeight;
 
                     if (!isLandscape) {
                       return _buildCompactLayout(

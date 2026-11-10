@@ -9,14 +9,16 @@ void main() {
   WidgetsFlutterBinding.ensureInitialized();
   MediaKit.ensureInitialized();
 
-  // Edge-to-edge transparent system UI on Android & iOS (uses full screen face)
-  SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+  // True Fullscreen Immersive Sticky mode on Android & iOS (hides status & nav bars, full face)
+  SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
   SystemChrome.setSystemUIOverlayStyle(
     const SystemUiOverlayStyle(
       statusBarColor: Colors.transparent,
       statusBarIconBrightness: Brightness.light,
       systemNavigationBarColor: Colors.transparent,
       systemNavigationBarIconBrightness: Brightness.light,
+      systemStatusBarContrastEnforced: false,
+      systemNavigationBarContrastEnforced: false,
     ),
   );
 

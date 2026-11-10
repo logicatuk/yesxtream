@@ -384,6 +384,10 @@ class _MovieDetailScreenState extends ConsumerState<MovieDetailScreen> {
 
           // ── Content ──
           SafeArea(
+            left: false,
+            right: false,
+            top: false,
+            bottom: false,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -398,7 +402,7 @@ class _MovieDetailScreenState extends ConsumerState<MovieDetailScreen> {
                 Expanded(
                   child: LayoutBuilder(
                     builder: (context, constraints) {
-                      final isNarrow = constraints.maxWidth < 700;
+                      final isPortrait = constraints.maxHeight >= constraints.maxWidth;
 
                       Widget posterCard({double? width, double? height}) {
                         return Container(
@@ -435,7 +439,7 @@ class _MovieDetailScreenState extends ConsumerState<MovieDetailScreen> {
                         return Wrap(
                           spacing: 10,
                           runSpacing: 8,
-                          alignment: isNarrow ? WrapAlignment.center : WrapAlignment.start,
+                          alignment: isPortrait ? WrapAlignment.center : WrapAlignment.start,
                           crossAxisAlignment: WrapCrossAlignment.center,
                           children: [
                             if (userScore != null && userScore.isNotEmpty)
@@ -509,7 +513,7 @@ class _MovieDetailScreenState extends ConsumerState<MovieDetailScreen> {
                         return Wrap(
                           spacing: 12,
                           runSpacing: 10,
-                          alignment: isNarrow ? WrapAlignment.center : WrapAlignment.start,
+                          alignment: isPortrait ? WrapAlignment.center : WrapAlignment.start,
                           children: [
                             FilledButton.icon(
                               onPressed: () => _play(),
@@ -581,13 +585,13 @@ class _MovieDetailScreenState extends ConsumerState<MovieDetailScreen> {
 
                       Widget buildDetails() {
                         return Column(
-                          crossAxisAlignment: isNarrow ? CrossAxisAlignment.center : CrossAxisAlignment.start,
+                          crossAxisAlignment: isPortrait ? CrossAxisAlignment.center : CrossAxisAlignment.start,
                           children: [
                             Text(
                               widget.movie.name,
-                              textAlign: isNarrow ? TextAlign.center : TextAlign.start,
+                              textAlign: isPortrait ? TextAlign.center : TextAlign.start,
                               style: TextStyle(
-                                fontSize: isNarrow ? 22 : 30,
+                                fontSize: isPortrait ? 22 : 30,
                                 fontWeight: FontWeight.w900,
                                 color: Colors.white,
                                 letterSpacing: -0.5,
@@ -692,10 +696,7 @@ class _MovieDetailScreenState extends ConsumerState<MovieDetailScreen> {
                         );
                       }
 
-                      final isShortLandscape = constraints.maxHeight < 520 &&
-                          constraints.maxWidth > constraints.maxHeight;
-
-                      if (isNarrow && !isShortLandscape) {
+                      if (isPortrait) {
                         return SingleChildScrollView(
                           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
                           child: Column(
@@ -713,6 +714,7 @@ class _MovieDetailScreenState extends ConsumerState<MovieDetailScreen> {
                       }
 
                       // Landscape phone (wide but short)
+                      final isShortLandscape = constraints.maxHeight < 520;
                       if (isShortLandscape) {
                         return SingleChildScrollView(
                           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
@@ -727,14 +729,14 @@ class _MovieDetailScreenState extends ConsumerState<MovieDetailScreen> {
                         );
                       }
 
-                      // Desktop / Tablet
+                      // Desktop / Tablet Landscape
                       return SingleChildScrollView(
                         padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
                         child: Row(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            posterCard(),
-                            const SizedBox(width: 36),
+                            posterCard(width: 200, height: 300),
+                            const SizedBox(width: 32),
                             Expanded(child: buildDetails()),
                           ],
                         ),
