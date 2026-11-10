@@ -402,7 +402,7 @@ class _MovieDetailScreenState extends ConsumerState<MovieDetailScreen> {
                 Expanded(
                   child: LayoutBuilder(
                     builder: (context, constraints) {
-                      final isPortrait = constraints.maxHeight >= constraints.maxWidth;
+                      final isPortrait = MediaQuery.orientationOf(context) == Orientation.portrait;
 
                       Widget posterCard({double? width, double? height}) {
                         return Container(
@@ -590,6 +590,8 @@ class _MovieDetailScreenState extends ConsumerState<MovieDetailScreen> {
                             Text(
                               widget.movie.name,
                               textAlign: isPortrait ? TextAlign.center : TextAlign.start,
+                              maxLines: 3,
+                              overflow: TextOverflow.ellipsis,
                               style: TextStyle(
                                 fontSize: isPortrait ? 22 : 30,
                                 fontWeight: FontWeight.w900,
@@ -714,7 +716,7 @@ class _MovieDetailScreenState extends ConsumerState<MovieDetailScreen> {
                       }
 
                       // Landscape phone (wide but short)
-                      final isShortLandscape = constraints.maxHeight < 520;
+                      final isShortLandscape = !isPortrait && constraints.maxHeight < 520;
                       if (isShortLandscape) {
                         return SingleChildScrollView(
                           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),

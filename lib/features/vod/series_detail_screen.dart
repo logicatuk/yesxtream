@@ -494,7 +494,7 @@ class _SeriesDetailScreenState extends ConsumerState<SeriesDetailScreen> {
                 Expanded(
                   child: LayoutBuilder(
                     builder: (context, constraints) {
-                      final isPortrait = constraints.maxHeight >= constraints.maxWidth;
+                      final isPortrait = MediaQuery.orientationOf(context) == Orientation.portrait;
 
                       Widget buildEpisodeCard(TmdbEpisode ep) {
                         final isSelected = ep.episodeNumber == _selectedEpisode?.episodeNumber;
@@ -567,6 +567,8 @@ class _SeriesDetailScreenState extends ConsumerState<SeriesDetailScreen> {
                                     children: [
                                       Text(
                                         'E${ep.episodeNumber} • ${ep.name ?? "Episode ${ep.episodeNumber}"}',
+                                        maxLines: 2,
+                                        overflow: TextOverflow.ellipsis,
                                         style: const TextStyle(
                                           fontWeight: FontWeight.bold,
                                           color: Colors.white,
