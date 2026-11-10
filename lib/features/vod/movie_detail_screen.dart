@@ -233,10 +233,26 @@ class _MovieDetailScreenState extends ConsumerState<MovieDetailScreen> {
   }
 
   void _launchTrailer(String key) async {
-    final url = key.startsWith('http') ? key : 'https://www.youtube.com/watch?v=$key';
+    final cleanKey = key.trim();
+    if (cleanKey.isEmpty) return;
+    final url = cleanKey.startsWith('http') ? cleanKey : 'https://www.youtube.com/watch?v=$cleanKey';
     final uri = Uri.tryParse(url);
-    if (uri != null && await canLaunchUrl(uri)) {
-      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    if (uri == null) return;
+    try {
+      final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
+      if (!launched) {
+        await launchUrl(uri, mode: LaunchMode.platformDefault);
+      }
+    } catch (_) {
+      try {
+        await launchUrl(uri);
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Could not open trailer: $url')),
+          );
+        }
+      }
     }
   }
 
@@ -676,7 +692,10 @@ class _MovieDetailScreenState extends ConsumerState<MovieDetailScreen> {
                         );
                       }
 
-                      if (isNarrow) {
+                      final isShortLandscape = constraints.maxHeight < 520 &&
+                          constraints.maxWidth > constraints.maxHeight;
+
+                      if (isNarrow && !isShortLandscape) {
                         return SingleChildScrollView(
                           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
                           child: Column(
@@ -693,6 +712,22 @@ class _MovieDetailScreenState extends ConsumerState<MovieDetailScreen> {
                         );
                       }
 
+                      // Landscape phone (wide but short)
+                      if (isShortLandscape) {
+                        return SingleChildScrollView(
+                          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              posterCard(width: 140, height: 210),
+                              const SizedBox(width: 24),
+                              Expanded(child: buildDetails()),
+                            ],
+                          ),
+                        );
+                      }
+
+                      // Desktop / Tablet
                       return SingleChildScrollView(
                         padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
                         child: Row(

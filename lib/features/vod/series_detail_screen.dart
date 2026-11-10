@@ -340,10 +340,26 @@ class _SeriesDetailScreenState extends ConsumerState<SeriesDetailScreen> {
   }
 
   void _launchTrailer(String key) async {
-    final url = key.startsWith('http') ? key : 'https://www.youtube.com/watch?v=$key';
+    final cleanKey = key.trim();
+    if (cleanKey.isEmpty) return;
+    final url = cleanKey.startsWith('http') ? cleanKey : 'https://www.youtube.com/watch?v=$cleanKey';
     final uri = Uri.tryParse(url);
-    if (uri != null && await canLaunchUrl(uri)) {
-      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    if (uri == null) return;
+    try {
+      final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
+      if (!launched) {
+        await launchUrl(uri, mode: LaunchMode.platformDefault);
+      }
+    } catch (_) {
+      try {
+        await launchUrl(uri);
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Could not open trailer: $url')),
+          );
+        }
+      }
     }
   }
 
@@ -404,8 +420,16 @@ class _SeriesDetailScreenState extends ConsumerState<SeriesDetailScreen> {
     // Trailer Key
     final trailerKey = _xtreamSeriesInfo?['youtube_trailer'] as String? ?? _tmdbDetail?.trailerKey;
 
-    final totalSeasons = _tmdbDetail?.numberOfSeasons ??
-        (_xtreamFallbackEpisodes.isNotEmpty ? _xtreamFallbackEpisodes.keys.length : 1);
+    final availableSeasonsSet = <int>{};
+    if (_tmdbDetail?.numberOfSeasons != null && _tmdbDetail!.numberOfSeasons! > 0) {
+      availableSeasonsSet.addAll(List.generate(_tmdbDetail!.numberOfSeasons!, (i) => i + 1));
+    }
+    availableSeasonsSet.addAll(_xtreamFallbackEpisodes.keys);
+    if (availableSeasonsSet.isEmpty) availableSeasonsSet.add(1);
+    final sortedSeasons = availableSeasonsSet.toList()..sort();
+    if (!sortedSeasons.contains(_selectedSeason)) {
+      _selectedSeason = sortedSeasons.first;
+    }
     final settings = ref.watch(appSettingsProvider);
 
     return Scaffold(
@@ -599,7 +623,7 @@ class _SeriesDetailScreenState extends ConsumerState<SeriesDetailScreen> {
                                     dropdownColor: const Color(0xFF1E1E2E),
                                     style: const TextStyle(color: Colors.white, fontSize: 14),
                                     icon: const Icon(Icons.keyboard_arrow_down_rounded, color: Colors.white54),
-                                    items: List.generate(totalSeasons, (i) => i + 1).map((s) {
+                                    items: sortedSeasons.map((s) {
                                       return DropdownMenuItem<int>(
                                         value: s,
                                         child: Text('${settings.tr('season')} $s'),
@@ -636,16 +660,16 @@ class _SeriesDetailScreenState extends ConsumerState<SeriesDetailScreen> {
                         );
                       }
 
-                      Widget buildOverviewDetails({bool includePoster = false}) {
+                      Widget buildOverviewDetails({bool includePoster = false, bool isCompact = false}) {
                         return SingleChildScrollView(
-                          padding: const EdgeInsets.all(20),
+                          padding: EdgeInsets.all(isCompact ? 12 : 20),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               if (includePoster) ...[
                                 Container(
-                                  width: 160,
-                                  height: 235,
+                                  width: isCompact ? 105 : 160,
+                                  height: isCompact ? 150 : 235,
                                   decoration: BoxDecoration(
                                     borderRadius: BorderRadius.circular(14),
                                     boxShadow: [
@@ -666,11 +690,11 @@ class _SeriesDetailScreenState extends ConsumerState<SeriesDetailScreen> {
                                         )
                                       : const Icon(Icons.tv, size: 60, color: Colors.white24),
                                 ),
-                                const SizedBox(height: 16),
+                                SizedBox(height: isCompact ? 10 : 16),
                                 Text(
                                   widget.series.name,
-                                  style: const TextStyle(
-                                    fontSize: 22,
+                                  style: TextStyle(
+                                    fontSize: isCompact ? 18 : 22,
                                     fontWeight: FontWeight.bold,
                                     color: Colors.white,
                                   ),
@@ -826,7 +850,35 @@ class _SeriesDetailScreenState extends ConsumerState<SeriesDetailScreen> {
                         );
                       }
 
-                      // ── Mobile Responsive Layout (< 800px) ──
+                      final isShortLandscape = constraints.maxHeight < 520 &&
+                          constraints.maxWidth > constraints.maxHeight;
+
+                      // ── Landscape Phone Layout (Wide & Short: e.g. 800x380) ──
+                      // Eliminates pinned header; gives episode list 100% full height to scroll freely!
+                      if (isShortLandscape) {
+                        return Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            // Left: Compact Overview (width: 250-280)
+                            SizedBox(
+                              width: constraints.maxWidth < 700 ? 230 : 270,
+                              child: buildOverviewDetails(includePoster: true, isCompact: true),
+                            ),
+                            // Right: Full-height Season Selector & Episodes
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  buildSeasonSelector(),
+                                  Expanded(child: buildEpisodesList()),
+                                ],
+                              ),
+                            ),
+                          ],
+                        );
+                      }
+
+                      // ── Portrait Mobile Responsive Layout (< 800px) ──
                       if (isMobile) {
                         final epCount = _seasonDetail?.episodes.length ?? 0;
 

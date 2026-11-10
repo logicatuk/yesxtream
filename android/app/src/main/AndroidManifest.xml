@@ -6,6 +6,23 @@
     <!-- Android TV: declare Leanback support (required="false" so phone/tablet still works) -->
     <uses-feature android:name="android.software.leanback" android:required="false"/>
 
+    <!-- Package visibility queries for opening web links and YouTube trailers on Android 11+ -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="https" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="http" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="vnd.youtube" />
+        </intent>
+        <package android:name="com.google.android.youtube" />
+    </queries>
+
     <application
         android:label="YesXtream"
         android:name="${applicationName}"

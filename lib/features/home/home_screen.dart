@@ -115,9 +115,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               SafeArea(
                 child: LayoutBuilder(
                   builder: (context, constraints) {
-                    final isLandscape = constraints.maxWidth >= 780 &&
-                        constraints.maxWidth > constraints.maxHeight &&
-                        constraints.maxHeight >= 420;
+                    final isLandscape = constraints.maxWidth > constraints.maxHeight &&
+                        constraints.maxWidth >= 550;
 
                     if (!isLandscape) {
                       return _buildCompactLayout(
@@ -129,15 +128,17 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                       );
                     }
 
+                    final isShortHeight = constraints.maxHeight < 480;
+
                     return Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 32,
-                        vertical: 16,
+                      padding: EdgeInsets.symmetric(
+                        horizontal: constraints.maxWidth < 800 ? 16 : 32,
+                        vertical: isShortHeight ? 6 : 16,
                       ),
                       child: Column(
                         children: [
                           // ── Top Header (Logo center, Expiry right) ──
-                          _buildHeader(activePlaylist, accountInfo, settings),
+                          _buildHeader(activePlaylist, accountInfo, settings, isShort: isShortHeight),
 
                           // ── Center Main Dashboard (Auto-scaled to fit any screen) ──
                           Expanded(
@@ -181,8 +182,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   Widget _buildHeader(
     db.Provider? playlist,
     AccountInfo? accountInfo,
-    AppSettings settings,
-  ) {
+    AppSettings settings, {
+    bool isShort = false,
+  }) {
     String expiryText;
     if (accountInfo?.expDate != null) {
       final dateStr = DateFormat('dd/MM/yyyy').format(accountInfo!.expDate!);
@@ -230,7 +232,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         }
 
         return SizedBox(
-          height: 60,
+          height: isShort ? 42 : 60,
           child: Stack(
             alignment: Alignment.center,
             children: [
