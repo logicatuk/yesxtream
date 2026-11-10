@@ -202,34 +202,37 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       builder: (context, constraints) {
         final isNarrow = constraints.maxWidth < 650;
         if (isNarrow) {
-          return Padding(
-            padding: const EdgeInsets.only(bottom: 6),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const _BrandLogo(),
-                if (expiryText.isNotEmpty) ...[
-                  const SizedBox(height: 6),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.08),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: Colors.white12),
-                    ),
-                    child: Text(
-                      expiryText,
-                      style: const TextStyle(
-                        color: Colors.white70,
-                        fontSize: 11,
-                        fontWeight: FontWeight.w500,
+          return Center(
+            child: Padding(
+              padding: const EdgeInsets.only(top: 2, bottom: 6),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  const _BrandLogo(),
+                  if (expiryText.isNotEmpty) ...[
+                    const SizedBox(height: 6),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.08),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: Colors.white12),
                       ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
+                      child: Text(
+                        expiryText,
+                        style: const TextStyle(
+                          color: Colors.white70,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w500,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
-                  ),
+                  ],
                 ],
-              ],
+              ),
             ),
           );
         }
@@ -415,138 +418,144 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     return LayoutBuilder(
       builder: (context, constraints) {
         final availableWidth = constraints.maxWidth;
+        final availableHeight = constraints.maxHeight;
         final hPad = availableWidth < 380 ? 12.0 : 16.0;
 
-        return Column(
-          children: [
-            // ── Header: Logo + expiry pill, horizontally centered ──
-            Padding(
-              padding: EdgeInsets.fromLTRB(hPad, 14, hPad, 0),
-              child: _buildHeader(activePlaylist, accountInfo, settings),
-            ),
+        // Adaptive spacing based on screen height
+        final isVeryTall = availableHeight > 800;
+        final isShort = availableHeight < 640;
+        final gap = isVeryTall ? 12.0 : (isShort ? 7.0 : 9.0);
 
-            // ── Main content, stretched to fill available height ──
-            Expanded(
-              child: Padding(
-                padding: EdgeInsets.fromLTRB(hPad, 0, hPad, 10),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+        return Padding(
+          padding: EdgeInsets.fromLTRB(hPad, isShort ? 6.0 : 12.0, hPad, 8.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // ── Header: Logo + expiry pill, horizontally centered ──
+              _buildHeader(activePlaylist, accountInfo, settings),
+              SizedBox(height: gap),
+
+              // ── 1. Hero: Live TV ──
+              Expanded(
+                flex: 13,
+                child: _TvHeroTile(
+                  title: settings.tr('live_tv'),
+                  isCompact: isShort,
+                  onTap: () => context.go('/live'),
+                ),
+              ),
+              SizedBox(height: gap),
+
+              // ── 2. Row 1: Movies & Series ──
+              Expanded(
+                flex: 9,
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    // Hero: Live TV
-                    _TvHeroTile(
-                      title: settings.tr('live_tv'),
-                      onTap: () => context.go('/live'),
-                    ),
-
-                    // Row 1: Movies & Series
-                    IntrinsicHeight(
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          Expanded(
-                            child: _TvGridTile(
-                              title: settings.tr('movies'),
-                              icon: Icons.play_circle_outline_rounded,
-                              onTap: () => context.go('/movies'),
-                            ),
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: _TvGridTile(
-                              title: settings.tr('series'),
-                              icon: Icons.movie_creation_outlined,
-                              onTap: () => context.go('/series'),
-                            ),
-                          ),
-                        ],
+                    Expanded(
+                      child: _TvGridTile(
+                        title: settings.tr('movies'),
+                        icon: Icons.play_circle_outline_rounded,
+                        onTap: () => context.go('/movies'),
                       ),
                     ),
-
-                    // Row 2: Catchup TV & Account Details
-                    IntrinsicHeight(
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          Expanded(
-                            child: _TvGridTile(
-                              title: settings.tr('catchup_tv'),
-                              icon: Icons.replay_rounded,
-                              badgeText: 'REPLAY',
-                              onTap: () => context.go('/catchup'),
-                            ),
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: _TvGridTile(
-                              title: settings.tr('account_details'),
-                              icon: Icons.people_alt_outlined,
-                              onTap: () => _showAccountDialog(
-                                context,
-                                activePlaylist,
-                                accountInfo,
-                                stats,
-                                settings,
-                              ),
-                            ),
-                          ),
-                        ],
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: _TvGridTile(
+                        title: settings.tr('series'),
+                        icon: Icons.movie_creation_outlined,
+                        onTap: () => context.go('/series'),
                       ),
                     ),
-
-                    // Switch Playlist: horizontal layout (icon left, text right)
-                    _TvGridTileHorizontal(
-                      title: settings.tr('switch_playlist'),
-                      icon: Icons.switch_account_outlined,
-                      onTap: () => _showPlaylistSwitcher(context, settings),
-                    ),
-
-                    // Action Buttons Row
-                    Row(
-                      children: [
-                        Expanded(
-                          child: SizedBox(
-                            height: 44,
-                            child: _TvActionButton(
-                              title: settings.tr('settings'),
-                              icon: Icons.settings_outlined,
-                              onTap: () => context.go('/settings'),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: SizedBox(
-                            height: 44,
-                            child: _TvActionButton(
-                              title: settings.tr('refresh_playlist'),
-                              icon: Icons.refresh_rounded,
-                              isLoading: _isReloading,
-                              onTap: () => _handleReload(activePlaylist, settings),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: SizedBox(
-                            height: 44,
-                            child: _TvActionButton(
-                              title: settings.tr('exit_dialog_confirm'),
-                              icon: Icons.logout_rounded,
-                              isExit: true,
-                              onTap: () => _showExitDialog(context, settings),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-
-                    // Footer version tag
-                    _buildFooter(),
                   ],
                 ),
               ),
-            ),
-          ],
+              SizedBox(height: gap),
+
+              // ── 3. Row 2: Catchup TV & Account Details ──
+              Expanded(
+                flex: 9,
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Expanded(
+                      child: _TvGridTile(
+                        title: settings.tr('catchup_tv'),
+                        icon: Icons.replay_rounded,
+                        badgeText: 'REPLAY',
+                        onTap: () => context.go('/catchup'),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: _TvGridTile(
+                        title: settings.tr('account_details'),
+                        icon: Icons.people_alt_outlined,
+                        onTap: () => _showAccountDialog(
+                          context,
+                          activePlaylist,
+                          accountInfo,
+                          stats,
+                          settings,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              SizedBox(height: gap),
+
+              // ── 4. Switch Playlist: horizontal layout (icon left, text right) ──
+              Expanded(
+                flex: 5,
+                child: _TvGridTileHorizontal(
+                  title: settings.tr('switch_playlist'),
+                  icon: Icons.switch_account_outlined,
+                  onTap: () => _showPlaylistSwitcher(context, settings),
+                ),
+              ),
+              SizedBox(height: gap),
+
+              // ── 5. Action Buttons Row: Settings, Refresh, Exit ──
+              Expanded(
+                flex: 4,
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Expanded(
+                      child: _TvActionButton(
+                        title: settings.tr('settings'),
+                        icon: Icons.settings_outlined,
+                        onTap: () => context.go('/settings'),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: _TvActionButton(
+                        title: settings.tr('refresh_playlist'),
+                        icon: Icons.refresh_rounded,
+                        isLoading: _isReloading,
+                        onTap: () => _handleReload(activePlaylist, settings),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: _TvActionButton(
+                        title: settings.tr('exit_dialog_confirm'),
+                        icon: Icons.logout_rounded,
+                        isExit: true,
+                        onTap: () => _showExitDialog(context, settings),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              SizedBox(height: isVeryTall ? 6.0 : 4.0),
+
+              // ── Footer version tag ──
+              _buildFooter(),
+            ],
+          ),
         );
       },
     );
@@ -1271,10 +1280,12 @@ class _BrandLogo extends StatelessWidget {
 class _TvHeroTile extends StatefulWidget {
   final String title;
   final VoidCallback onTap;
+  final bool isCompact;
 
   const _TvHeroTile({
     required this.title,
     required this.onTap,
+    this.isCompact = false,
   });
 
   @override
@@ -1306,6 +1317,8 @@ class _TvHeroTileState extends State<_TvHeroTile> {
           curve: Curves.easeOutCubic,
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 180),
+            width: double.infinity,
+            height: double.infinity,
             decoration: BoxDecoration(
               gradient: LinearGradient(
                 begin: Alignment.topLeft,
@@ -1331,22 +1344,30 @@ class _TvHeroTileState extends State<_TvHeroTile> {
                 ),
               ],
             ),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                // Stylized TV icon with play triangle inside
-                const _TvWithPlayIcon(size: 80),
-                const SizedBox(height: 18),
-                Text(
-                  widget.title,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 22,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 0.4,
+            child: Center(
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      // Stylized TV icon with play triangle inside
+                      _TvWithPlayIcon(size: widget.isCompact ? 56 : 72),
+                      SizedBox(height: widget.isCompact ? 10 : 14),
+                      Text(
+                        widget.title,
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: widget.isCompact ? 20 : 22,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 0.4,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-              ],
+              ),
             ),
           ),
         ),
@@ -1473,7 +1494,9 @@ class _TvGridTileState extends State<_TvGridTile> {
           curve: Curves.easeOutCubic,
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 180),
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            width: double.infinity,
+            height: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
             decoration: BoxDecoration(
               gradient: LinearGradient(
                 begin: Alignment.topLeft,
@@ -1528,24 +1551,30 @@ class _TvGridTileState extends State<_TvGridTile> {
                   ),
 
                 Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(widget.icon, size: 44, color: Colors.white),
-                      const SizedBox(height: 8),
-                      Text(
-                        widget.title,
-                        textAlign: TextAlign.center,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                          height: 1.15,
-                        ),
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(widget.icon, size: 36, color: Colors.white),
+                          const SizedBox(height: 6),
+                          Text(
+                            widget.title,
+                            textAlign: TextAlign.center,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                              height: 1.15,
+                            ),
+                          ),
+                        ],
                       ),
-                    ],
+                    ),
                   ),
                 ),
               ],
@@ -1601,7 +1630,9 @@ class _TvGridTileHorizontalState extends State<_TvGridTileHorizontal> {
           curve: Curves.easeOutCubic,
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 180),
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+            width: double.infinity,
+            height: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             decoration: BoxDecoration(
               gradient: LinearGradient(
                 begin: Alignment.topLeft,
@@ -1627,21 +1658,27 @@ class _TvGridTileHorizontalState extends State<_TvGridTileHorizontal> {
                 ),
               ],
             ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(widget.icon, size: 32, color: Colors.white),
-                const SizedBox(width: 14),
-                Text(
-                  widget.title,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                    height: 1.2,
-                  ),
+            child: Center(
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(widget.icon, size: 26, color: Colors.white),
+                    const SizedBox(width: 10),
+                    Text(
+                      widget.title,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                        height: 1.2,
+                      ),
+                    ),
+                  ],
                 ),
-              ],
+              ),
             ),
           ),
         ),
@@ -1696,7 +1733,9 @@ class _TvActionButtonState extends State<_TvActionButton> {
           curve: Curves.easeOutCubic,
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 180),
-            padding: const EdgeInsets.symmetric(horizontal: 10),
+            width: double.infinity,
+            height: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
             decoration: BoxDecoration(
               color: _highlight
                   ? const Color(0xFF6C5CE7).withValues(alpha: 0.35)
@@ -1717,40 +1756,43 @@ class _TvActionButtonState extends State<_TvActionButton> {
                 ),
               ],
             ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                if (widget.isLoading)
-                  const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(
-                      color: Colors.white,
-                      strokeWidth: 2.0,
+            child: Center(
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (widget.isLoading)
+                      const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(
+                          color: Colors.white,
+                          strokeWidth: 2.0,
+                        ),
+                      )
+                    else
+                      Icon(
+                        widget.icon,
+                        size: 17,
+                        color: Colors.white,
+                      ),
+                    const SizedBox(width: 5),
+                    Text(
+                      widget.title,
+                      maxLines: 1,
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 12,
+                        fontWeight:
+                            widget.isExit ? FontWeight.w800 : FontWeight.w600,
+                        letterSpacing: widget.isExit ? 0.4 : 0.2,
+                      ),
                     ),
-                  )
-                else
-                  Icon(
-                    widget.icon,
-                    size: 18,
-                    color: Colors.white,
-                  ),
-                const SizedBox(width: 6),
-                Flexible(
-                  child: Text(
-                    widget.title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 12,
-                      fontWeight:
-                          widget.isExit ? FontWeight.w800 : FontWeight.w600,
-                      letterSpacing: widget.isExit ? 0.4 : 0.2,
-                    ),
-                  ),
+                  ],
                 ),
-              ],
+              ),
             ),
           ),
         ),
