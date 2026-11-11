@@ -35,7 +35,7 @@ cp -R build/web/* build/webos_app/
 rm -f build/webos_app/config.xml
 
 if command -v ares-package >/dev/null 2>&1; then
-  ares-package build/webos_app -o build/
+  ares-package --no-minify build/webos_app -o build/
   echo "==> Built LG webOS IPK in build/ via ares-package"
 else
   echo "==> 'ares-package' not found; staged webOS bundle at build/webos_app/ (install @webosose/ares-cli to package .ipk)"
