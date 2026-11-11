@@ -144,6 +144,8 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
   // Long-press timer for TV remote multi-select (CENTER held >600ms)
   Timer? _longPressTimer;
   String? _longPressChannelId;
+  // Debounce timer so rapid D-pad scrolling doesn't trigger a new stream on every row
+  Timer? _focusSelectTimer;
 
   // Failover groups state
   List<db.FailoverGroup> _failoverGroups = [];
@@ -592,6 +594,7 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
     _providersSub?.cancel();
     _channelsSub?.cancel();
     _longPressTimer?.cancel();
+    _focusSelectTimer?.cancel();
     _focusNode.dispose();
     super.dispose();
   }
@@ -1358,6 +1361,7 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
     }
 
     if (event.logicalKey == LogicalKeyboardKey.channelUp ||
+        event.logicalKey == LogicalKeyboardKey.pageUp ||
         (!isTvInput && event.logicalKey == LogicalKeyboardKey.arrowUp)) {
       final newIndex = (_selectedIndex - 1).clamp(0, _filteredChannels.length - 1);
       if (newIndex != _selectedIndex) {
@@ -1368,12 +1372,29 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
     }
 
     if (event.logicalKey == LogicalKeyboardKey.channelDown ||
+        event.logicalKey == LogicalKeyboardKey.pageDown ||
         (!isTvInput && event.logicalKey == LogicalKeyboardKey.arrowDown)) {
       final newIndex = (_selectedIndex + 1).clamp(0, _filteredChannels.length - 1);
       if (newIndex != _selectedIndex) {
         _selectChannel(newIndex);
         _scrollToIndex(newIndex);
       }
+      return KeyEventResult.handled;
+    }
+
+    if (event.logicalKey == LogicalKeyboardKey.mediaPlayPause ||
+        event.logicalKey == LogicalKeyboardKey.mediaPlay ||
+        event.logicalKey == LogicalKeyboardKey.mediaPause) {
+      try {
+        ref.read(playerServiceProvider).player.playOrPause();
+      } catch (_) {}
+      return KeyEventResult.handled;
+    }
+
+    if (event.logicalKey == LogicalKeyboardKey.mediaStop) {
+      try {
+        ref.read(playerServiceProvider).stop();
+      } catch (_) {}
       return KeyEventResult.handled;
     }
 
@@ -4047,9 +4068,12 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
       }
     }
 
+    final rowHeight = _isTvNav ? 54.0 : 44.0;
     final listWidget = ListView.builder(
       controller: _channelListController,
       padding: EdgeInsets.zero,
+      cacheExtent: 400,
+      itemExtent: failoverGroupWidgets.isEmpty ? rowHeight : null,
       itemCount: _filteredChannels.length + (failoverGroupWidgets.isNotEmpty ? failoverGroupWidgets.length + 1 : 0),
       itemBuilder: (context, index) {
         // Inject failover group rows at the top
@@ -4066,93 +4090,56 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
         final isSelected = index == _selectedIndex;
         final isFavorited = _favoritedChannelIds.contains(channel.id);
 
-        return Material(
-          color: Colors.transparent,
-          child: GestureDetector(
-            onSecondaryTapUp: (_) => _showFavoriteListSheet(channel),
-            child: Focus(
-              focusNode: index == 0 ? _firstChannelFocusNode : null,
-              autofocus: index == 0 && _isTvNav,
-              onFocusChange: (hasFocus) {
-                if (hasFocus && _isTvNav) _selectChannel(index);
-              },
-              onKeyEvent: (node, event) {
-                final key = event.logicalKey;
-                final isCenterKey = key == LogicalKeyboardKey.select ||
-                    key == LogicalKeyboardKey.enter ||
-                    key == LogicalKeyboardKey.gameButtonA;
+        return RepaintBoundary(
+          child: Material(
+            color: Colors.transparent,
+            child: GestureDetector(
+              onSecondaryTapUp: (_) => _showFavoriteListSheet(channel),
+              child: Focus(
+                focusNode: index == 0 ? _firstChannelFocusNode : null,
+                autofocus: index == 0 && _isTvNav,
+                onFocusChange: (hasFocus) {
+                  if (hasFocus && _isTvNav) {
+                    _focusSelectTimer?.cancel();
+                    _focusSelectTimer = Timer(const Duration(milliseconds: 220), () {
+                      if (mounted) _selectChannel(index);
+                    });
+                  }
+                },
+                onKeyEvent: (node, event) {
+                  final key = event.logicalKey;
+                  final isCenterKey = key == LogicalKeyboardKey.select ||
+                      key == LogicalKeyboardKey.enter ||
+                      key == LogicalKeyboardKey.gameButtonA;
 
-                if (_isTvNav && isCenterKey) {
-                  if (event is KeyDownEvent) {
-                    _longPressChannelId = channel.id;
-                    _longPressTimer?.cancel();
-                    _longPressTimer = Timer(const Duration(milliseconds: 400), () {
-                      if (!mounted) return;
-                      setState(() {
-                        if (!_multiSelectMode) {
-                          _multiSelectMode = true;
-                          _multiSelectedChannelIds = {channel.id};
-                        } else {
-                          if (_multiSelectedChannelIds.contains(channel.id)) {
-                            _multiSelectedChannelIds.remove(channel.id);
+                  if (_isTvNav && isCenterKey) {
+                    if (event is KeyDownEvent) {
+                      _longPressChannelId = channel.id;
+                      _longPressTimer?.cancel();
+                      _longPressTimer = Timer(const Duration(milliseconds: 400), () {
+                        if (!mounted) return;
+                        setState(() {
+                          if (!_multiSelectMode) {
+                            _multiSelectMode = true;
+                            _multiSelectedChannelIds = {channel.id};
                           } else {
-                            _multiSelectedChannelIds.add(channel.id);
+                            if (_multiSelectedChannelIds.contains(channel.id)) {
+                              _multiSelectedChannelIds.remove(channel.id);
+                            } else {
+                              _multiSelectedChannelIds.add(channel.id);
+                            }
                           }
-                        }
+                        });
+                        _longPressChannelId = null;
                       });
-                      _longPressChannelId = null;
-                    });
-                    return KeyEventResult.handled;
-                  }
-                  if (event is KeyUpEvent) {
-                    final wasLongPress = _longPressChannelId == null;
-                    _longPressTimer?.cancel();
-                    _longPressTimer = null;
-                    _longPressChannelId = null;
-                    if (wasLongPress) return KeyEventResult.handled;
-                    if (_multiSelectMode) {
-                      setState(() {
-                        if (_multiSelectedChannelIds.contains(channel.id)) {
-                          _multiSelectedChannelIds.remove(channel.id);
-                        } else {
-                          _multiSelectedChannelIds.add(channel.id);
-                        }
-                      });
-                    } else {
-                      _goFullscreen(channel);
+                      return KeyEventResult.handled;
                     }
-                    return KeyEventResult.handled;
-                  }
-                  return KeyEventResult.handled;
-                }
-
-                if (event is! KeyDownEvent) return KeyEventResult.ignored;
-                if (isCenterKey) {
-                  if (_multiSelectMode) {
-                    setState(() {
-                      if (_multiSelectedChannelIds.contains(channel.id)) {
-                        _multiSelectedChannelIds.remove(channel.id);
-                      } else {
-                        _multiSelectedChannelIds.add(channel.id);
-                      }
-                    });
-                  } else {
-                    _goFullscreen(channel);
-                  }
-                  return KeyEventResult.handled;
-                }
-                if (key == LogicalKeyboardKey.arrowLeft) {
-                  _sidebarAllItemFocusNode.requestFocus();
-                  return KeyEventResult.handled;
-                }
-                return KeyEventResult.ignored;
-              },
-              child: Builder(
-                builder: (context) {
-                  final focused = Focus.of(context).hasFocus;
-                  final isMultiSelected = _multiSelectMode && _multiSelectedChannelIds.contains(channel.id);
-                  return InkWell(
-                    onTap: () {
+                    if (event is KeyUpEvent) {
+                      final wasLongPress = _longPressChannelId == null;
+                      _longPressTimer?.cancel();
+                      _longPressTimer = null;
+                      _longPressChannelId = null;
+                      if (wasLongPress) return KeyEventResult.handled;
                       if (_multiSelectMode) {
                         setState(() {
                           if (_multiSelectedChannelIds.contains(channel.id)) {
@@ -4162,108 +4149,159 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
                           }
                         });
                       } else {
-                        _selectChannel(index, forcePlay: true);
-                        if (!_compactShowPreview) {
-                          _goFullscreen(channel);
-                        }
+                        _focusSelectTimer?.cancel();
+                        _goFullscreen(channel);
                       }
-                    },
-                    onDoubleTap: () => _goFullscreen(channel),
-                    borderRadius: BorderRadius.zero,
-                    child: Container(
-                      height: 44,
-                      padding: const EdgeInsets.symmetric(horizontal: 10),
-                      decoration: BoxDecoration(
-                        color: isMultiSelected
-                            ? const Color(0xFF6C5CE7).withValues(alpha: 0.25)
-                            : isSelected
-                            ? const Color(0xFF6C5CE7).withValues(alpha: 0.25)
-                            : focused
-                                ? const Color(0xFF6C5CE7).withValues(alpha: 0.15)
-                                : Colors.transparent,
-                        border: Border(
-                          bottom: const BorderSide(color: Color(0xFF1E1D2F), width: 1),
-                          left: isSelected
-                              ? const BorderSide(color: Color(0xFFFFD32A), width: 3.5)
-                              : BorderSide.none,
+                      return KeyEventResult.handled;
+                    }
+                    return KeyEventResult.handled;
+                  }
+
+                  if (event is! KeyDownEvent) return KeyEventResult.ignored;
+                  if (isCenterKey) {
+                    if (_multiSelectMode) {
+                      setState(() {
+                        if (_multiSelectedChannelIds.contains(channel.id)) {
+                          _multiSelectedChannelIds.remove(channel.id);
+                        } else {
+                          _multiSelectedChannelIds.add(channel.id);
+                        }
+                      });
+                    } else {
+                      _focusSelectTimer?.cancel();
+                      _goFullscreen(channel);
+                    }
+                    return KeyEventResult.handled;
+                  }
+                  if (key == LogicalKeyboardKey.arrowLeft) {
+                    _sidebarAllItemFocusNode.requestFocus();
+                    return KeyEventResult.handled;
+                  }
+                  return KeyEventResult.ignored;
+                },
+                child: Builder(
+                  builder: (context) {
+                    final focused = Focus.of(context).hasFocus;
+                    final isMultiSelected = _multiSelectMode && _multiSelectedChannelIds.contains(channel.id);
+                    return InkWell(
+                      onTap: () {
+                        if (_multiSelectMode) {
+                          setState(() {
+                            if (_multiSelectedChannelIds.contains(channel.id)) {
+                              _multiSelectedChannelIds.remove(channel.id);
+                            } else {
+                              _multiSelectedChannelIds.add(channel.id);
+                            }
+                          });
+                        } else {
+                          _focusSelectTimer?.cancel();
+                          _selectChannel(index, forcePlay: true);
+                          if (!_compactShowPreview) {
+                            _goFullscreen(channel);
+                          }
+                        }
+                      },
+                      onDoubleTap: () => _goFullscreen(channel),
+                      borderRadius: BorderRadius.zero,
+                      child: Container(
+                        height: rowHeight,
+                        padding: const EdgeInsets.symmetric(horizontal: 10),
+                        decoration: BoxDecoration(
+                          color: isMultiSelected
+                              ? const Color(0xFF6C5CE7).withValues(alpha: 0.25)
+                              : isSelected
+                              ? const Color(0xFF6C5CE7).withValues(alpha: 0.25)
+                              : focused
+                                  ? const Color(0xFF6C5CE7).withValues(alpha: 0.22)
+                                  : Colors.transparent,
+                          border: Border(
+                            bottom: const BorderSide(color: Color(0xFF1E1D2F), width: 1),
+                            left: focused
+                                ? const BorderSide(color: Colors.white, width: 3.5)
+                                : (isSelected
+                                    ? const BorderSide(color: Color(0xFFFFD32A), width: 3.5)
+                                    : BorderSide.none),
+                          ),
+                        ),
+                        child: Row(
+                          children: [
+                            if (_multiSelectMode)
+                              Padding(
+                                padding: const EdgeInsets.only(right: 6),
+                                child: Icon(
+                                  isMultiSelected ? Icons.check_box : Icons.check_box_outline_blank,
+                                  size: 18,
+                                  color: isMultiSelected ? const Color(0xFF6C5CE7) : Colors.white38,
+                                ),
+                              ),
+                            // Stream ID / channel number
+                            SizedBox(
+                              width: 44,
+                              child: Text(
+                                _extractStreamId(channel, index),
+                                style: TextStyle(
+                                  color: isSelected ? const Color(0xFFFFD32A) : Colors.white38,
+                                  fontSize: 11,
+                                  fontFamily: 'monospace',
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            const SizedBox(width: 4),
+
+                            // Channel Logo
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(4),
+                              child: SizedBox(
+                                width: 28,
+                                height: 20,
+                                child: channel.tvgLogo != null && channel.tvgLogo!.isNotEmpty
+                                    ? Image.network(
+                                        channel.tvgLogo!,
+                                        fit: BoxFit.contain,
+                                        cacheWidth: 64,
+                                        cacheHeight: 64,
+                                        errorBuilder: (_, __, ___) => const Icon(Icons.tv, size: 14, color: Colors.white24),
+                                      )
+                                    : const Icon(Icons.tv, size: 14, color: Colors.white24),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+
+                            // Channel Name
+                            Expanded(
+                              child: Text(
+                                _channelDisplayName(channel),
+                                style: TextStyle(
+                                  color: isSelected ? const Color(0xFFFFD32A) : Colors.white,
+                                  fontSize: _isTvNav ? 14 : 13,
+                                  fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+
+                            // Favorite Star
+                            if (isFavorited)
+                              const Padding(
+                                padding: EdgeInsets.only(left: 4),
+                                child: Icon(Icons.star_rounded, size: 15, color: Color(0xFFFFD32A)),
+                              ),
+
+                            // Replay icon
+                            if (channel.tvgId != null && channel.tvgId!.isNotEmpty)
+                              const Padding(
+                                padding: EdgeInsets.only(left: 4),
+                                child: Icon(Icons.replay_rounded, size: 14, color: Color(0xFF6C5CE7)),
+                              ),
+                          ],
                         ),
                       ),
-                      child: Row(
-                        children: [
-                          if (_multiSelectMode)
-                            Padding(
-                              padding: const EdgeInsets.only(right: 6),
-                              child: Icon(
-                                isMultiSelected ? Icons.check_box : Icons.check_box_outline_blank,
-                                size: 18,
-                                color: isMultiSelected ? const Color(0xFF6C5CE7) : Colors.white38,
-                              ),
-                            ),
-                          // Stream ID / channel number
-                          SizedBox(
-                            width: 44,
-                            child: Text(
-                              _extractStreamId(channel, index),
-                              style: TextStyle(
-                                color: isSelected ? const Color(0xFFFFD32A) : Colors.white38,
-                                fontSize: 11,
-                                fontFamily: 'monospace',
-                              ),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                          const SizedBox(width: 4),
-
-                          // Channel Logo
-                          ClipRRect(
-                            borderRadius: BorderRadius.circular(4),
-                            child: SizedBox(
-                              width: 28,
-                              height: 20,
-                              child: channel.tvgLogo != null && channel.tvgLogo!.isNotEmpty
-                                  ? Image.network(
-                                      channel.tvgLogo!,
-                                      fit: BoxFit.contain,
-                                      errorBuilder: (_, __, ___) => const Icon(Icons.tv, size: 14, color: Colors.white24),
-                                    )
-                                  : const Icon(Icons.tv, size: 14, color: Colors.white24),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-
-                          // Channel Name
-                          Expanded(
-                            child: Text(
-                              _channelDisplayName(channel),
-                              style: TextStyle(
-                                color: isSelected ? const Color(0xFFFFD32A) : Colors.white,
-                                fontSize: 13,
-                                fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
-                              ),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-
-                          // Favorite Star
-                          if (isFavorited)
-                            const Padding(
-                              padding: EdgeInsets.only(left: 4),
-                              child: Icon(Icons.star_rounded, size: 15, color: Color(0xFFFFD32A)),
-                            ),
-
-                          // Replay icon
-                          if (channel.tvgId != null && channel.tvgId!.isNotEmpty)
-                            const Padding(
-                              padding: EdgeInsets.only(left: 4),
-                              child: Icon(Icons.replay_rounded, size: 14, color: Color(0xFF6C5CE7)),
-                            ),
-                        ],
-                      ),
-                    ),
-                  );
-                },
+                    );
+                  },
+                ),
               ),
             ),
           ),

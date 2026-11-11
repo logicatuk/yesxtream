@@ -1,4 +1,5 @@
 import 'dart:ui';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -72,13 +73,57 @@ class _YesXtreamAppState extends ConsumerState<YesXtreamApp> {
       debugShowCheckedModeBanner: false,
       theme: YesXtreamTheme.dark,
       routerConfig: router,
+      // On Web (LG webOS / Samsung Tizen), _defaultWebShortcuts maps Enter to
+      // ButtonActivateIntent and Arrow keys to ScrollIntent, breaking TV remote
+      // OK/D-pad activation on FocusableActionDetector tiles and focus traversal.
+      shortcuts: kIsWeb
+          ? <ShortcutActivator, Intent>{
+              ...WidgetsApp.defaultShortcuts,
+              const SingleActivator(LogicalKeyboardKey.enter):
+                  const ActivateIntent(),
+              const SingleActivator(LogicalKeyboardKey.numpadEnter):
+                  const ActivateIntent(),
+              const SingleActivator(LogicalKeyboardKey.select):
+                  const ActivateIntent(),
+              const SingleActivator(LogicalKeyboardKey.gameButtonA):
+                  const ActivateIntent(),
+              const SingleActivator(LogicalKeyboardKey.arrowLeft):
+                  const DirectionalFocusIntent(TraversalDirection.left),
+              const SingleActivator(LogicalKeyboardKey.arrowRight):
+                  const DirectionalFocusIntent(TraversalDirection.right),
+              const SingleActivator(LogicalKeyboardKey.arrowUp):
+                  const DirectionalFocusIntent(TraversalDirection.up),
+              const SingleActivator(LogicalKeyboardKey.arrowDown):
+                  const DirectionalFocusIntent(TraversalDirection.down),
+            }
+          : null,
       builder: (context, child) {
         // Detect TV mode from the first MediaQuery context
         PlatformInfo.detectFromContext(context);
-        return Directionality(
+
+        // ── Global TV Scale ──────────────────────────────────────────────────
+        // On LG webOS, Samsung Tizen, and Android TV the canvas is 1920×1080
+        // but the physical screen is 55–75", so all widget sizes appear tiny.
+        // We override the MediaQuery with a boosted textScaler and apply the
+        // same factor to our layout via tvScaleFactor().
+        final scale = PlatformInfo.tvScaleFactor(context);
+        Widget result = Directionality(
           textDirection: settings.isRtl ? TextDirection.rtl : TextDirection.ltr,
           child: child ?? const SizedBox.shrink(),
         );
+        if (scale > 1.0) {
+          final mq = MediaQuery.of(context);
+          result = MediaQuery(
+            data: mq.copyWith(
+              textScaler: TextScaler.linear(scale),
+            ),
+            child: Theme(
+              data: YesXtreamTheme.scaled(scale),
+              child: result,
+            ),
+          );
+        }
+        return result;
       },
     );
   }

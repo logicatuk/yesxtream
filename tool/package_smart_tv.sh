@@ -5,6 +5,9 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
 echo "==> Building Flutter Web (release) for Smart TV..."
+# Use --dart2js-optimization O1 for faster startup on TV browsers (Chrome 120 on webOS).
+# The HTML renderer flag was removed in Flutter 3.24+; we instead configure
+# flutter_bootstrap.js to pick the lighter canvaskit/chromium variant.
 flutter build web --release --no-wasm-dry-run
 
 # LG webOS (.ipk) and Samsung Tizen (.wgt) load index.html from a local package URL.

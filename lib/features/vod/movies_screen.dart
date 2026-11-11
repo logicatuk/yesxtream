@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import '../../core/platform_info.dart';
 import '../../data/datasources/local/database.dart' as db;
 import '../../data/datasources/remote/tmdb_client.dart';
 import '../../data/services/playback_history_service.dart';
@@ -428,10 +429,11 @@ class _MoviesScreenState extends ConsumerState<MoviesScreen> {
                             )
                           : GridView.builder(
                               controller: _scrollController,
+                              cacheExtent: 500,
                               padding: const EdgeInsets.all(20),
                               gridDelegate:
-                                  const SliverGridDelegateWithMaxCrossAxisExtent(
-                                maxCrossAxisExtent: 180,
+                                  SliverGridDelegateWithMaxCrossAxisExtent(
+                                maxCrossAxisExtent: PlatformInfo.isTV ? 230 : 180,
                                 childAspectRatio: 0.65,
                                 crossAxisSpacing: 16,
                                 mainAxisSpacing: 16,
@@ -943,62 +945,65 @@ class _MovieCardState extends ConsumerState<_MovieCard> {
         history.progressFraction > 0.05 &&
         history.progressFraction < 0.90;
 
-    return Focus(
-      canRequestFocus: false,
-      child: Builder(
-        builder: (context) {
-          final hasFocus = Focus.of(context).hasFocus;
+    return RepaintBoundary(
+      child: Focus(
+        canRequestFocus: false,
+        child: Builder(
+          builder: (context) {
+            final hasFocus = Focus.of(context).hasFocus;
+            final isTV = PlatformInfo.isTV;
 
-          return MouseRegion(
-            onEnter: (_) => setState(() => _isHovered = true),
-            onExit: (_) => setState(() => _isHovered = false),
-            child: InkWell(
-              onTap: () {
-                context.push('/movies/detail', extra: movie);
-              },
-              borderRadius: BorderRadius.circular(12),
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 150),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF141322),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
-                    color: hasFocus
-                        ? Colors.white
-                        : (_isHovered ? accent : const Color(0xFF26243A)),
-                    width: hasFocus ? 2.5 : (_isHovered ? 1.5 : 1),
+            return MouseRegion(
+              onEnter: isTV ? null : (_) => setState(() => _isHovered = true),
+              onExit: isTV ? null : (_) => setState(() => _isHovered = false),
+              child: InkWell(
+                onTap: () {
+                  context.push('/movies/detail', extra: movie);
+                },
+                borderRadius: BorderRadius.circular(12),
+                child: AnimatedContainer(
+                  duration: Duration(milliseconds: isTV ? 50 : 150),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF141322),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: hasFocus
+                          ? Colors.white
+                          : (_isHovered ? accent : const Color(0xFF26243A)),
+                      width: hasFocus ? (isTV ? 3.0 : 2.5) : (_isHovered ? 1.5 : 1),
+                    ),
+                    boxShadow: (!isTV && (hasFocus || _isHovered))
+                        ? [
+                            BoxShadow(
+                              color: accent.withValues(alpha: 0.3),
+                              blurRadius: 12,
+                              offset: const Offset(0, 4),
+                            ),
+                          ]
+                        : null,
                   ),
-                  boxShadow: hasFocus || _isHovered
-                      ? [
-                          BoxShadow(
-                            color: accent.withValues(alpha: 0.3),
-                            blurRadius: 12,
-                            offset: const Offset(0, 4),
-                          ),
-                        ]
-                      : null,
-                ),
-                clipBehavior: Clip.antiAlias,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(
-                      child: Stack(
-                        fit: StackFit.expand,
-                        children: [
-                          movie.tvgLogo != null && movie.tvgLogo!.isNotEmpty
-                              ? CachedNetworkImage(
-                                  imageUrl: movie.tvgLogo!,
-                                  fit: BoxFit.cover,
-                                  errorWidget: (_, __, ___) => const Center(
+                  clipBehavior: Clip.antiAlias,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        child: Stack(
+                          fit: StackFit.expand,
+                          children: [
+                            movie.tvgLogo != null && movie.tvgLogo!.isNotEmpty
+                                ? CachedNetworkImage(
+                                    imageUrl: movie.tvgLogo!,
+                                    fit: BoxFit.cover,
+                                    memCacheWidth: 320,
+                                    errorWidget: (_, __, ___) => const Center(
+                                      child: Icon(Icons.movie_rounded,
+                                          size: 40, color: Colors.white24),
+                                    ),
+                                  )
+                                : const Center(
                                     child: Icon(Icons.movie_rounded,
                                         size: 40, color: Colors.white24),
                                   ),
-                                )
-                              : const Center(
-                                  child: Icon(Icons.movie_rounded,
-                                      size: 40, color: Colors.white24),
-                                ),
                           // Watched badge
                           if (isWatched)
                             Positioned(
@@ -1129,7 +1134,8 @@ class _MovieCardState extends ConsumerState<_MovieCard> {
               ),
             ),
           );
-        },
+          },
+        ),
       ),
     );
   }

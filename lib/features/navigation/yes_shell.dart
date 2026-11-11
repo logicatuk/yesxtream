@@ -55,9 +55,17 @@ class _YesShellState extends ConsumerState<YesShell> {
     String location,
     AppSettings settings,
   ) {
+    final isTV = PlatformInfo.isTV || PlatformInfo.isAndroid;
+    final scale = PlatformInfo.tvScaleFactor(context);
+    final barHeight = isTV ? (58 * scale).clamp(58.0, 110.0) : 58.0;
+    final logoSize = (32 * scale).clamp(32.0, 56.0);
+    final titleFontSize = (16 * scale).clamp(16.0, 28.0);
+    final tabFontSize = (14 * scale).clamp(14.0, 24.0);
+    final clockFontSize = (13 * scale).clamp(13.0, 22.0);
+
     return Container(
-      height: 58,
-      padding: const EdgeInsets.symmetric(horizontal: 16),
+      height: barHeight,
+      padding: EdgeInsets.symmetric(horizontal: isTV ? 24 : 16),
       decoration: const BoxDecoration(
         color: Color(0xFF0D0D18),
         border: Border(
@@ -89,17 +97,17 @@ class _YesShellState extends ConsumerState<YesShell> {
                         borderRadius: BorderRadius.circular(8),
                         child: Image.asset(
                           'assets/icon/yestream.png',
-                          width: 32,
-                          height: 32,
+                          width: logoSize,
+                          height: logoSize,
                           fit: BoxFit.cover,
                         ),
                       ),
                       if (!isVeryCompact) ...[
                         const SizedBox(width: 8),
-                        const Text(
+                        Text(
                           'YESXTREAM',
                           style: TextStyle(
-                            fontSize: 16,
+                            fontSize: titleFontSize,
                             fontWeight: FontWeight.w900,
                             letterSpacing: 1.1,
                             color: Colors.white,
@@ -121,6 +129,7 @@ class _YesShellState extends ConsumerState<YesShell> {
                 title: settings.tr('nav_home'),
                 route: '/home',
                 isSelected: location == '/' || location == '/home',
+                fontSize: tabFontSize,
               ),
               _buildTabDivider(),
               _buildTopTab(
@@ -128,6 +137,7 @@ class _YesShellState extends ConsumerState<YesShell> {
                 title: settings.tr('nav_live'),
                 route: '/live',
                 isSelected: location.startsWith('/live'),
+                fontSize: tabFontSize,
               ),
               _buildTabDivider(),
               _buildTopTab(
@@ -135,6 +145,7 @@ class _YesShellState extends ConsumerState<YesShell> {
                 title: settings.tr('nav_movies'),
                 route: '/movies',
                 isSelected: location.startsWith('/movies'),
+                fontSize: tabFontSize,
               ),
               _buildTabDivider(),
               _buildTopTab(
@@ -142,6 +153,7 @@ class _YesShellState extends ConsumerState<YesShell> {
                 title: settings.tr('nav_series'),
                 route: '/series',
                 isSelected: location.startsWith('/series'),
+                fontSize: tabFontSize,
               ),
 
               // ── 3. Desktop Search & Timer (Hidden on mobile/compact) ──
@@ -180,7 +192,7 @@ class _YesShellState extends ConsumerState<YesShell> {
                   ),
                 ),
                 const Spacer(),
-                const _ShellClockTimer(),
+                _ShellClockTimer(fontSize: clockFontSize),
               ],
             ],
           );
@@ -194,6 +206,7 @@ class _YesShellState extends ConsumerState<YesShell> {
     required String title,
     required String route,
     required bool isSelected,
+    double fontSize = 14,
   }) {
     return Focus(
       canRequestFocus: false,
@@ -221,7 +234,7 @@ class _YesShellState extends ConsumerState<YesShell> {
                     : Colors.transparent,
                 border: Border.all(
                   color: hasFocus ? Colors.white : Colors.transparent,
-                  width: 1.5,
+                  width: hasFocus ? 2.0 : 1.5,
                 ),
               ),
               child: Text(
@@ -230,7 +243,7 @@ class _YesShellState extends ConsumerState<YesShell> {
                   color: isSelected
                       ? const Color(0xFFFFD32A)
                       : (hasFocus ? Colors.white : Colors.white70),
-                  fontSize: 14,
+                  fontSize: fontSize,
                   fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
                   shadows: isSelected
                       ? [
@@ -261,7 +274,8 @@ class _YesShellState extends ConsumerState<YesShell> {
 
 /// Real-time clock timer in HH:mm format for the top bar
 class _ShellClockTimer extends StatefulWidget {
-  const _ShellClockTimer();
+  final double fontSize;
+  const _ShellClockTimer({this.fontSize = 13});
 
   @override
   State<_ShellClockTimer> createState() => _ShellClockTimerState();
@@ -303,13 +317,13 @@ class _ShellClockTimerState extends State<_ShellClockTimer> {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Icon(Icons.access_time_rounded, size: 14, color: Color(0xFF6C5CE7)),
+          Icon(Icons.access_time_rounded, size: widget.fontSize + 1, color: const Color(0xFF6C5CE7)),
           const SizedBox(width: 6),
           Text(
             _time,
-            style: const TextStyle(
+            style: TextStyle(
               color: Colors.white,
-              fontSize: 13,
+              fontSize: widget.fontSize,
               fontWeight: FontWeight.bold,
               letterSpacing: 0.5,
               fontFamily: 'monospace',

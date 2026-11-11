@@ -8,7 +8,16 @@ class YesXtreamTheme {
   static const _surface = Color(0xFF0A0A0F);
   static const _card = Color(0xFF1A1A2E);
 
-  static ThemeData get dark {
+  /// Returns a TV-scaled ThemeData for LG webOS, Samsung Tizen, and Android TV.
+  /// All font sizes, icon sizes, and minimum touch targets are multiplied by [scale].
+  static ThemeData scaled(double scale) => _buildTheme(scale);
+
+  static ThemeData get dark => _buildTheme(1.0);
+
+  static ThemeData _buildTheme(double scale) {
+    // Helper to scale a size, keeping it ≥ original
+    double s(double v) => scale > 1.0 ? (v * scale).roundToDouble() : v;
+
     return ThemeData(
       brightness: Brightness.dark,
       useMaterial3: true,
@@ -40,17 +49,18 @@ class YesXtreamTheme {
           borderRadius: BorderRadius.circular(8),
         ),
         selectedTileColor: _accent.withValues(alpha: 0.2),
+        minVerticalPadding: scale > 1.0 ? 16 : 4,
       ),
-      // Filled button focus styling
+      // Filled button focus styling — larger minimum size on TV
       filledButtonTheme: FilledButtonThemeData(
         style: FilledButton.styleFrom(
-          minimumSize: const Size(64, 48),
+          minimumSize: Size(s(64), s(48)),
           backgroundColor: _accent,
           foregroundColor: Colors.white,
         ).copyWith(
           side: WidgetStateProperty.resolveWith((states) {
             if (states.contains(WidgetState.focused)) {
-              return const BorderSide(color: Colors.white, width: 2);
+              return BorderSide(color: Colors.white, width: scale > 1.0 ? 3 : 2);
             }
             return null;
           }),
@@ -59,11 +69,11 @@ class YesXtreamTheme {
       // Text button focus styling
       textButtonTheme: TextButtonThemeData(
         style: TextButton.styleFrom(
-          minimumSize: const Size(64, 48),
+          minimumSize: Size(s(64), s(48)),
         ).copyWith(
           side: WidgetStateProperty.resolveWith((states) {
             if (states.contains(WidgetState.focused)) {
-              return const BorderSide(color: _accent, width: 2);
+              return BorderSide(color: _accent, width: scale > 1.0 ? 3 : 2);
             }
             return null;
           }),
@@ -72,11 +82,11 @@ class YesXtreamTheme {
       // Icon button focus styling
       iconButtonTheme: IconButtonThemeData(
         style: IconButton.styleFrom(
-          minimumSize: const Size(48, 48),
+          minimumSize: Size(s(48), s(48)),
         ).copyWith(
           side: WidgetStateProperty.resolveWith((states) {
             if (states.contains(WidgetState.focused)) {
-              return const BorderSide(color: _accent, width: 2);
+              return BorderSide(color: _accent, width: scale > 1.0 ? 3 : 2);
             }
             return null;
           }),
@@ -112,10 +122,13 @@ class YesXtreamTheme {
       inputDecorationTheme: InputDecorationTheme(
         border: const OutlineInputBorder(),
         focusedBorder: OutlineInputBorder(
-          borderSide: const BorderSide(color: _accent, width: 2),
+          borderSide: BorderSide(color: _accent, width: scale > 1.0 ? 3 : 2),
           borderRadius: BorderRadius.circular(8),
         ),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        contentPadding: EdgeInsets.symmetric(
+          horizontal: s(16),
+          vertical: s(14),
+        ),
       ),
       // Tab bar styling
       tabBarTheme: const TabBarThemeData(
@@ -123,23 +136,23 @@ class YesXtreamTheme {
         labelColor: _accent,
         unselectedLabelColor: Colors.white54,
       ),
-      textTheme: const TextTheme(
+      textTheme: TextTheme(
         headlineLarge: TextStyle(
-          fontSize: 28,
+          fontSize: s(28),
           fontWeight: FontWeight.bold,
           color: Colors.white,
         ),
         headlineMedium: TextStyle(
-          fontSize: 22,
+          fontSize: s(22),
           fontWeight: FontWeight.w600,
           color: Colors.white,
         ),
         bodyLarge: TextStyle(
-          fontSize: 16,
+          fontSize: s(16),
           color: Colors.white70,
         ),
         bodyMedium: TextStyle(
-          fontSize: 14,
+          fontSize: s(14),
           color: Colors.white60,
         ),
       ),

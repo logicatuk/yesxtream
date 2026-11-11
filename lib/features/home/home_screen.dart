@@ -1,4 +1,5 @@
 import 'dart:io' as io show exit;
+import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -148,6 +149,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     }
 
                     final isShortHeight = constraints.maxHeight < 480;
+                    final maxW = (constraints.maxWidth * 0.86).clamp(320.0, 1650.0);
+                    final maxH = (constraints.maxHeight * 0.64).clamp(180.0, 580.0);
+                    final dashScale = math.min(maxW / 940.0, maxH / 255.0);
 
                     return Padding(
                       padding: EdgeInsets.symmetric(
@@ -159,21 +163,30 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                           // ── Top Header (Logo center, Expiry right) ──
                           _buildHeader(activePlaylist, accountInfo, settings, isShort: isShortHeight),
 
-                          // ── Center Main Dashboard (Auto-scaled to fit any screen) ──
+                          // ── Center Main Dashboard (Auto-scaled to fit any screen size) ──
                           Expanded(
                             child: Center(
-                              child: FittedBox(
-                                fit: BoxFit.scaleDown,
-                                alignment: Alignment.center,
-                                child: SizedBox(
-                                  width: 940,
-                                  height: 255,
-                                  child: _buildLandscapeDashboard(
-                                    context,
-                                    activePlaylist,
-                                    accountInfo,
-                                    stats,
-                                    settings,
+                              child: SizedBox(
+                                width: 940.0 * dashScale,
+                                height: 255.0 * dashScale,
+                                child: FittedBox(
+                                  fit: BoxFit.contain,
+                                  alignment: Alignment.center,
+                                  child: MediaQuery(
+                                    data: MediaQuery.of(context).copyWith(
+                                      textScaler: TextScaler.noScaling,
+                                    ),
+                                    child: SizedBox(
+                                      width: 940,
+                                      height: 255,
+                                      child: _buildLandscapeDashboard(
+                                        context,
+                                        activePlaylist,
+                                        accountInfo,
+                                        stats,
+                                        settings,
+                                      ),
+                                    ),
                                   ),
                                 ),
                               ),
@@ -1320,10 +1333,12 @@ class _TvHeroTileState extends State<_TvHeroTile> {
 
   @override
   Widget build(BuildContext context) {
+    final isTV = PlatformInfo.isTV;
+    final animDur = Duration(milliseconds: isTV ? 60 : 180);
     return FocusableActionDetector(
       autofocus: true,
       onFocusChange: (f) => setState(() => _isFocused = f),
-      onShowHoverHighlight: (h) => setState(() => _isHovered = h),
+      onShowHoverHighlight: isTV ? null : (h) => setState(() => _isHovered = h),
       actions: {
         ActivateIntent: CallbackAction<ActivateIntent>(
           onInvoke: (_) => widget.onTap(),
@@ -1333,10 +1348,10 @@ class _TvHeroTileState extends State<_TvHeroTile> {
         onTap: widget.onTap,
         child: AnimatedScale(
           scale: _highlight ? 1.04 : 1.0,
-          duration: const Duration(milliseconds: 180),
+          duration: animDur,
           curve: Curves.easeOutCubic,
           child: AnimatedContainer(
-            duration: const Duration(milliseconds: 180),
+            duration: animDur,
             width: double.infinity,
             height: double.infinity,
             decoration: BoxDecoration(
@@ -1352,17 +1367,19 @@ class _TvHeroTileState extends State<_TvHeroTile> {
                 color: _highlight
                     ? Colors.white
                     : const Color(0xFFA29BFE).withValues(alpha: 0.5),
-                width: _highlight ? 2.4 : 1.4,
+                width: _highlight ? (isTV ? 3.2 : 2.4) : 1.4,
               ),
-              boxShadow: [
-                BoxShadow(
-                  color: _highlight
-                      ? const Color(0xFF6C5CE7).withValues(alpha: 0.6)
-                      : const Color(0xFF6C5CE7).withValues(alpha: 0.35),
-                  blurRadius: _highlight ? 24 : 16,
-                  offset: const Offset(0, 6),
-                ),
-              ],
+              boxShadow: isTV && !_highlight
+                  ? null
+                  : [
+                      BoxShadow(
+                        color: _highlight
+                            ? const Color(0xFF6C5CE7).withValues(alpha: 0.6)
+                            : const Color(0xFF6C5CE7).withValues(alpha: 0.35),
+                        blurRadius: isTV ? 12 : (_highlight ? 24 : 16),
+                        offset: const Offset(0, 6),
+                      ),
+                    ],
             ),
             child: Center(
               child: FittedBox(
@@ -1498,9 +1515,11 @@ class _TvGridTileState extends State<_TvGridTile> {
 
   @override
   Widget build(BuildContext context) {
+    final isTV = PlatformInfo.isTV;
+    final animDur = Duration(milliseconds: isTV ? 60 : 180);
     return FocusableActionDetector(
       onFocusChange: (f) => setState(() => _isFocused = f),
-      onShowHoverHighlight: (h) => setState(() => _isHovered = h),
+      onShowHoverHighlight: isTV ? null : (h) => setState(() => _isHovered = h),
       actions: {
         ActivateIntent: CallbackAction<ActivateIntent>(
           onInvoke: (_) => widget.onTap(),
@@ -1510,10 +1529,10 @@ class _TvGridTileState extends State<_TvGridTile> {
         onTap: widget.onTap,
         child: AnimatedScale(
           scale: _highlight ? 1.04 : 1.0,
-          duration: const Duration(milliseconds: 180),
+          duration: animDur,
           curve: Curves.easeOutCubic,
           child: AnimatedContainer(
-            duration: const Duration(milliseconds: 180),
+            duration: animDur,
             width: double.infinity,
             height: double.infinity,
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
@@ -1530,17 +1549,19 @@ class _TvGridTileState extends State<_TvGridTile> {
                 color: _highlight
                     ? Colors.white
                     : const Color(0xFF6C5CE7).withValues(alpha: 0.45),
-                width: _highlight ? 2.0 : 1.2,
+                width: _highlight ? (isTV ? 3.0 : 2.0) : 1.2,
               ),
-              boxShadow: [
-                BoxShadow(
-                  color: _highlight
-                      ? const Color(0xFF6C5CE7).withValues(alpha: 0.5)
-                      : const Color(0xFF4834D4).withValues(alpha: 0.25),
-                  blurRadius: _highlight ? 18 : 12,
-                  offset: const Offset(0, 4),
-                ),
-              ],
+              boxShadow: isTV && !_highlight
+                  ? null
+                  : [
+                      BoxShadow(
+                        color: _highlight
+                            ? const Color(0xFF6C5CE7).withValues(alpha: 0.5)
+                            : const Color(0xFF4834D4).withValues(alpha: 0.25),
+                        blurRadius: isTV ? 10 : (_highlight ? 18 : 12),
+                        offset: const Offset(0, 4),
+                      ),
+                    ],
             ),
             child: Stack(
               children: [
@@ -1634,9 +1655,11 @@ class _TvGridTileHorizontalState extends State<_TvGridTileHorizontal> {
 
   @override
   Widget build(BuildContext context) {
+    final isTV = PlatformInfo.isTV;
+    final animDur = Duration(milliseconds: isTV ? 60 : 180);
     return FocusableActionDetector(
       onFocusChange: (f) => setState(() => _isFocused = f),
-      onShowHoverHighlight: (h) => setState(() => _isHovered = h),
+      onShowHoverHighlight: isTV ? null : (h) => setState(() => _isHovered = h),
       actions: {
         ActivateIntent: CallbackAction<ActivateIntent>(
           onInvoke: (_) => widget.onTap(),
@@ -1646,10 +1669,10 @@ class _TvGridTileHorizontalState extends State<_TvGridTileHorizontal> {
         onTap: widget.onTap,
         child: AnimatedScale(
           scale: _highlight ? 1.04 : 1.0,
-          duration: const Duration(milliseconds: 180),
+          duration: animDur,
           curve: Curves.easeOutCubic,
           child: AnimatedContainer(
-            duration: const Duration(milliseconds: 180),
+            duration: animDur,
             width: double.infinity,
             height: double.infinity,
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -1666,17 +1689,19 @@ class _TvGridTileHorizontalState extends State<_TvGridTileHorizontal> {
                 color: _highlight
                     ? Colors.white
                     : const Color(0xFF6C5CE7).withValues(alpha: 0.45),
-                width: _highlight ? 2.0 : 1.2,
+                width: _highlight ? (isTV ? 3.0 : 2.0) : 1.2,
               ),
-              boxShadow: [
-                BoxShadow(
-                  color: _highlight
-                      ? const Color(0xFF6C5CE7).withValues(alpha: 0.5)
-                      : const Color(0xFF4834D4).withValues(alpha: 0.25),
-                  blurRadius: _highlight ? 18 : 12,
-                  offset: const Offset(0, 4),
-                ),
-              ],
+              boxShadow: isTV && !_highlight
+                  ? null
+                  : [
+                      BoxShadow(
+                        color: _highlight
+                            ? const Color(0xFF6C5CE7).withValues(alpha: 0.5)
+                            : const Color(0xFF4834D4).withValues(alpha: 0.25),
+                        blurRadius: isTV ? 10 : (_highlight ? 18 : 12),
+                        offset: const Offset(0, 4),
+                      ),
+                    ],
             ),
             child: Center(
               child: FittedBox(
@@ -1737,9 +1762,11 @@ class _TvActionButtonState extends State<_TvActionButton> {
 
   @override
   Widget build(BuildContext context) {
+    final isTV = PlatformInfo.isTV;
+    final animDur = Duration(milliseconds: isTV ? 60 : 180);
     return FocusableActionDetector(
       onFocusChange: (f) => setState(() => _isFocused = f),
-      onShowHoverHighlight: (h) => setState(() => _isHovered = h),
+      onShowHoverHighlight: isTV ? null : (h) => setState(() => _isHovered = h),
       actions: {
         ActivateIntent: CallbackAction<ActivateIntent>(
           onInvoke: (_) => widget.onTap(),
@@ -1749,10 +1776,10 @@ class _TvActionButtonState extends State<_TvActionButton> {
         onTap: widget.onTap,
         child: AnimatedScale(
           scale: _highlight ? 1.03 : 1.0,
-          duration: const Duration(milliseconds: 180),
+          duration: animDur,
           curve: Curves.easeOutCubic,
           child: AnimatedContainer(
-            duration: const Duration(milliseconds: 180),
+            duration: animDur,
             width: double.infinity,
             height: double.infinity,
             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
@@ -1765,16 +1792,18 @@ class _TvActionButtonState extends State<_TvActionButton> {
                 color: _highlight
                     ? Colors.white
                     : const Color(0xFF6C5CE7).withValues(alpha: 0.35),
-                width: _highlight ? 1.8 : 1.2,
+                width: _highlight ? (isTV ? 2.8 : 1.8) : 1.2,
               ),
-              boxShadow: [
-                BoxShadow(
-                  color: _highlight
-                      ? const Color(0xFF6C5CE7).withValues(alpha: 0.4)
-                      : Colors.black26,
-                  blurRadius: _highlight ? 14 : 6,
-                ),
-              ],
+              boxShadow: isTV && !_highlight
+                  ? null
+                  : [
+                      BoxShadow(
+                        color: _highlight
+                            ? const Color(0xFF6C5CE7).withValues(alpha: 0.4)
+                            : Colors.black26,
+                        blurRadius: isTV ? 8 : (_highlight ? 14 : 6),
+                      ),
+                    ],
             ),
             child: Center(
               child: FittedBox(

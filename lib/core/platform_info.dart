@@ -55,7 +55,21 @@ class PlatformInfo {
     }
 
     if (isAndroid) {
-      _detectedAsTV = hasDirectionalNav || (isTvScreen && data.devicePixelRatio < 2.0);
+      _detectedAsTV = hasDirectionalNav || (isTvScreen && data.devicePixelRatio <= 2.0);
     }
+  }
+
+  /// Returns a UI scale factor for TV screens (LG webOS, Samsung Tizen, Android TV).
+  ///
+  /// Keeps text and theme targets comfortably legible from 10 feet while
+  /// avoiding overflow inside fixed-height lists and bars. Full-dashboard views
+  /// (like Home) scale proportionally via responsive layout constraints.
+  static double tvScaleFactor(BuildContext context) {
+    if (!isTV) return 1.0;
+    final w = MediaQuery.sizeOf(context).width;
+    if (w >= 1600) return 1.3;
+    if (w >= 1200) return 1.2;
+    if (w >= 800) return 1.1;
+    return 1.0;
   }
 }

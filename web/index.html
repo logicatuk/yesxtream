@@ -49,7 +49,31 @@
   </style>
 
   <script>
-    // ── Smart TV Remote Control Support (Samsung Tizen & LG webOS) ──
+    // ════════════════════════════════════════════════════════════════════════
+    //  Smart TV Performance & Remote Control Support — LG webOS & Samsung Tizen
+    // ════════════════════════════════════════════════════════════════════════
+
+    // Cap devicePixelRatio to 1 on Smart TV browsers (1920x1080 CSS is already
+    // upscaled by the TV hardware scaler; dpr=2 forces CanvasKit to rasterize
+    // 4x as many pixels = 3840x2160 per frame, causing severe UI lag).
+    (function() {
+      var isTvBrowser =
+        window.location.protocol === 'file:' ||
+        typeof window.tizen !== 'undefined' ||
+        typeof window.webOS !== 'undefined' ||
+        typeof window.PalmSystem !== 'undefined' ||
+        /Web0S|webOS|SmartTV|Tizen/i.test(navigator.userAgent);
+      if (isTvBrowser && window.devicePixelRatio > 1) {
+        try {
+          Object.defineProperty(window, 'devicePixelRatio', {
+            get: function() { return 1; },
+            configurable: true
+          });
+        } catch (e) {}
+      }
+    })();
+
+    // ── Exit helper ──────────────────────────────────────────────────────────
     window.yesxtreamExitApp = function() {
       try {
         if (window.tizen && window.tizen.application) {
@@ -66,62 +90,142 @@
       try { window.close(); } catch (e) {}
     };
 
-    window.addEventListener('load', function() {
-      // 1. Samsung Tizen Remote Key Registration
-      if (window.tizen && window.tizen.tvinputdevice) {
-        var tizenKeys = [
-          '0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
-          'MediaPlay', 'MediaPause', 'MediaPlayPause', 'MediaStop',
-          'MediaFastForward', 'MediaRewind',
-          'ChannelUp', 'ChannelDown', 'Info',
-          'ColorF0Red', 'ColorF1Green', 'ColorF2Yellow', 'ColorF3Blue'
-        ];
-        tizenKeys.forEach(function(k) {
-          try {
-            tizen.tvinputdevice.registerKey(k);
-          } catch (e) {}
-        });
+    // ── LG Magic Remote: prevent pointer jitter from stealing D-Pad focus ───
+    (function() {
+      var lastKeyTime = 0;
+      var lastX = -1;
+      var lastY = -1;
+      var KEY_DEBOUNCE_MS = 1500;
+
+      window.addEventListener('keydown', function() {
+        lastKeyTime = Date.now();
+      }, true);
+
+      function filterPointerEvent(e) {
+        if (Date.now() - lastKeyTime < KEY_DEBOUNCE_MS) {
+          e.stopImmediatePropagation();
+          return;
+        }
+        // Ignore sub-6px Magic Remote gyroscope micro-jitter
+        if (typeof e.clientX === 'number' && typeof e.clientY === 'number') {
+          if (lastX >= 0 && Math.abs(e.clientX - lastX) < 6 && Math.abs(e.clientY - lastY) < 6) {
+            e.stopImmediatePropagation();
+            return;
+          }
+          lastX = e.clientX;
+          lastY = e.clientY;
+        }
       }
 
-      // 2. LG webOS / Samsung Tizen Key Interceptor (Back / Return / Exit keys)
-      var dispatchingEscape = false;
+      ['mousemove', 'pointermove', 'mouseover', 'pointerover'].forEach(function(evtName) {
+        window.addEventListener(evtName, filterPointerEvent, true);
+      });
+    })();
+
+    // Register Samsung Tizen remote keys as soon as tizen.tvinputdevice exists
+    function registerTizenKeys() {
+      if (window.tizen && window.tizen.tvinputdevice) {
+        var tizenKeys = [
+          // Numeric
+          '0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
+          // Media transport
+          'MediaPlay', 'MediaPause', 'MediaPlayPause', 'MediaStop',
+          'MediaFastForward', 'MediaRewind', 'MediaTrackPrevious', 'MediaTrackNext',
+          // Channel / Volume
+          'ChannelUp', 'ChannelDown', 'VolumeUp', 'VolumeDown', 'VolumeMute',
+          // Navigation extras
+          'Info', 'Guide', 'PreviousChannel',
+          // Color buttons (Red/Green/Yellow/Blue)
+          'ColorF0Red', 'ColorF1Green', 'ColorF2Yellow', 'ColorF3Blue',
+          // Exit
+          'Exit'
+        ];
+        tizenKeys.forEach(function(k) {
+          try { tizen.tvinputdevice.registerKey(k); } catch (e) {}
+        });
+      }
+    }
+    registerTizenKeys();
+    window.addEventListener('load', registerTizenKeys);
+
+    // ── Full Key Code Interceptor (attached BEFORE Flutter loads) ───────────
+    // Maps platform-specific TV remote key codes to standard keys that
+    // Flutter's keyboard handling understands.
+    (function() {
+      var TV_KEY_MAP = {
+        // ── Back / Return → Escape ──────────────────────────────────────────
+        461:   { key: 'Escape', code: 'Escape', keyCode: 27 },   // LG Back
+        10009: { key: 'Escape', code: 'Escape', keyCode: 27 },   // Tizen Return
+
+        // ── Exit ───────────────────────────────────────────────────────────
+        1003:  null,  // LG Exit — handled specially
+        10182: null,  // Tizen Exit — handled specially
+
+        // ── Media Transport ────────────────────────────────────────────────
+        415:   { key: 'MediaPlay',        code: 'MediaPlay',        keyCode: 415 },
+        10252: { key: 'MediaPlayPause',   code: 'MediaPlayPause',   keyCode: 179 },
+        19:    { key: 'MediaPause',       code: 'MediaPause',       keyCode: 19  },
+        413:   { key: 'MediaStop',        code: 'MediaStop',        keyCode: 413 },
+        417:   { key: 'MediaFastForward', code: 'MediaFastForward', keyCode: 417 },
+        10228: { key: 'MediaFastForward', code: 'MediaFastForward', keyCode: 417 },
+        412:   { key: 'MediaRewind',      code: 'MediaRewind',      keyCode: 412 },
+        10227: { key: 'MediaRewind',      code: 'MediaRewind',      keyCode: 412 },
+
+        // ── Channel Up/Down → PageUp/PageDown ─────────────────────────────
+        427:   { key: 'PageUp',   code: 'PageUp',   keyCode: 33 },
+        428:   { key: 'PageDown', code: 'PageDown', keyCode: 34 },
+
+        // ── Color Buttons ─────────────────────────────────────────────────
+        403:   { key: 'ColorF0Red',    code: 'ColorF0Red',    keyCode: 403 },
+        404:   { key: 'ColorF1Green',  code: 'ColorF1Green',  keyCode: 404 },
+        405:   { key: 'ColorF2Yellow', code: 'ColorF2Yellow', keyCode: 405 },
+        406:   { key: 'ColorF3Blue',   code: 'ColorF3Blue',   keyCode: 406 },
+      };
+
+      var dispatchingMapped = false;
+
       window.addEventListener('keydown', function(e) {
-        if (dispatchingEscape) return;
-        // Samsung Tizen Exit key
-        if (e.keyCode === 10182) {
+        if (dispatchingMapped) return;
+
+        // Exit keys
+        if (e.keyCode === 1003 || e.keyCode === 10182) {
           e.preventDefault();
+          e.stopImmediatePropagation();
           window.yesxtreamExitApp();
           return;
         }
-        // Tizen Return / Back: 10009, webOS Back: 461
-        if (e.keyCode === 10009 || e.keyCode === 461) {
-          e.preventDefault();
-          dispatchingEscape = true;
-          try {
-            var downEvt = new KeyboardEvent('keydown', {
-              key: 'Escape',
-              code: 'Escape',
-              keyCode: 27,
-              which: 27,
+
+        var mapped = TV_KEY_MAP[e.keyCode];
+        if (!mapped) return;  // Not a known TV key — pass through normally
+
+        e.preventDefault();
+        e.stopImmediatePropagation();
+
+        var target = (document.activeElement && document.activeElement !== document.body)
+          ? document.activeElement
+          : (document.querySelector('flutter-view') || document.body || window);
+
+        dispatchingMapped = true;
+        try {
+          ['keydown', 'keyup'].forEach(function(type) {
+            var ev = new KeyboardEvent(type, {
+              key: mapped.key,
+              code: mapped.code,
               bubbles: true,
-              cancelable: true
+              cancelable: true,
+              composed: true,
             });
-            window.dispatchEvent(downEvt);
-            var upEvt = new KeyboardEvent('keyup', {
-              key: 'Escape',
-              code: 'Escape',
-              keyCode: 27,
-              which: 27,
-              bubbles: true,
-              cancelable: true
-            });
-            window.dispatchEvent(upEvt);
-          } finally {
-            dispatchingEscape = false;
-          }
+            try {
+              Object.defineProperty(ev, 'keyCode', { get: function() { return mapped.keyCode; } });
+              Object.defineProperty(ev, 'which', { get: function() { return mapped.keyCode; } });
+            } catch (_) {}
+            target.dispatchEvent(ev);
+          });
+        } finally {
+          dispatchingMapped = false;
         }
       }, true);
-    });
+    })();
   </script>
 </head>
 <body>

@@ -2,7 +2,7 @@
 {{flutter_build_config}}
 
 (function () {
-  // Packaged Smart TV apps (LG webOS / Samsung Tizen) run from file:// origins.
+  // Smart TV / packaged apps (LG webOS, Samsung Tizen) run from a file:// origin.
   // Calling navigator.serviceWorker.getRegistration() on LG webOS terminates
   // the WebAppManager renderer process on startup, and local CanvasKit assets
   // must be used instead of CDN fetches.
@@ -12,10 +12,17 @@
     typeof window.webOS !== 'undefined' ||
     typeof window.PalmSystem !== 'undefined';
 
+  var config = isTvOrFile
+    ? {
+        canvasKitBaseUrl: 'canvaskit/',
+        canvasKitVariant: 'chromium',
+      }
+    : {};
+
   var loadOptions = {
-    config: isTvOrFile ? { canvasKitBaseUrl: 'canvaskit/' } : {},
+    config: config,
     onEntrypointLoaded: async function (engineInitializer) {
-      var appRunner = await engineInitializer.initializeEngine(loadOptions.config);
+      var appRunner = await engineInitializer.initializeEngine(config);
       await appRunner.runApp();
       var loading = document.getElementById('loading-indicator');
       if (loading && loading.parentNode) {
@@ -33,4 +40,3 @@
 
   _flutter.loader.load(loadOptions);
 })();
-

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+import '../core/platform_info.dart';
 import '../data/datasources/local/database.dart' as db;
 import '../features/catchup/catchup_screen.dart';
 import '../features/channels/channels_screen.dart';
@@ -24,73 +25,89 @@ import '../features/vod/vod_player_screen.dart';
 final rootNavigatorKey = GlobalKey<NavigatorState>(debugLabel: 'root');
 final shellNavigatorKey = GlobalKey<NavigatorState>(debugLabel: 'shell');
 
+Page<void> _buildShellPage(GoRouterState state, Widget child) {
+  if (PlatformInfo.isTV) {
+    return NoTransitionPage<void>(key: state.pageKey, child: child);
+  }
+  return MaterialPage<void>(key: state.pageKey, child: child);
+}
+
 GoRouter createRouter() {
   // Routes wrapped inside the branded YesShell (top bar & navigation rail)
   final shellRoutes = [
     GoRoute(
       path: '/home',
-      builder: (context, state) => const HomeScreen(),
+      pageBuilder: (context, state) => _buildShellPage(state, const HomeScreen()),
     ),
     GoRoute(
       path: '/live',
-      builder: (context, state) => const ChannelsScreen(),
+      pageBuilder: (context, state) => _buildShellPage(state, const ChannelsScreen()),
     ),
     GoRoute(
       path: '/guide',
-      builder: (context, state) => const GuideScreen(),
+      pageBuilder: (context, state) => _buildShellPage(state, const GuideScreen()),
     ),
     GoRoute(
       path: '/catchup',
-      builder: (context, state) => CatchupScreen(
-        initialChannel: state.extra is db.Channel ? state.extra as db.Channel : null,
+      pageBuilder: (context, state) => _buildShellPage(
+        state,
+        CatchupScreen(
+          initialChannel: state.extra is db.Channel ? state.extra as db.Channel : null,
+        ),
       ),
     ),
     GoRoute(
       path: '/movies',
-      builder: (context, state) => const MoviesScreen(),
+      pageBuilder: (context, state) => _buildShellPage(state, const MoviesScreen()),
     ),
     GoRoute(
       path: '/series',
-      builder: (context, state) => const SeriesScreen(),
+      pageBuilder: (context, state) => _buildShellPage(state, const SeriesScreen()),
     ),
     GoRoute(
       path: '/favorites',
-      builder: (context, state) => const FavoritesScreen(),
+      pageBuilder: (context, state) => _buildShellPage(state, const FavoritesScreen()),
     ),
     GoRoute(
       path: '/playlists',
-      builder: (context, state) => const PlaylistManagerScreen(),
+      pageBuilder: (context, state) => _buildShellPage(state, const PlaylistManagerScreen()),
     ),
     GoRoute(
       path: '/continue-watching',
-      builder: (context, state) => const ContinueWatchingScreen(),
+      pageBuilder: (context, state) => _buildShellPage(state, const ContinueWatchingScreen()),
     ),
     GoRoute(
       path: '/search',
-      builder: (context, state) => const SearchScreen(),
+      pageBuilder: (context, state) => _buildShellPage(state, const SearchScreen()),
     ),
     GoRoute(
       path: '/settings',
-      builder: (context, state) => const SettingsScreen(),
+      pageBuilder: (context, state) => _buildShellPage(state, const SettingsScreen()),
     ),
     GoRoute(
       path: '/device-info',
-      builder: (context, state) =>
-          const SettingsScreen(initialGroup: SettingsGroup.deviceLicense),
+      pageBuilder: (context, state) => _buildShellPage(
+        state,
+        const SettingsScreen(initialGroup: SettingsGroup.deviceLicense),
+      ),
     ),
     GoRoute(
       path: '/parental-controls',
-      builder: (context, state) =>
-          const SettingsScreen(initialGroup: SettingsGroup.parentalControls),
+      pageBuilder: (context, state) => _buildShellPage(
+        state,
+        const SettingsScreen(initialGroup: SettingsGroup.parentalControls),
+      ),
     ),
     GoRoute(
       path: '/help',
-      builder: (context, state) =>
-          const SettingsScreen(initialGroup: SettingsGroup.helpAbout),
+      pageBuilder: (context, state) => _buildShellPage(
+        state,
+        const SettingsScreen(initialGroup: SettingsGroup.helpAbout),
+      ),
     ),
     GoRoute(
       path: '/epg-mapping',
-      builder: (context, state) => const EpgMappingScreen(),
+      pageBuilder: (context, state) => _buildShellPage(state, const EpgMappingScreen()),
     ),
   ];
 
