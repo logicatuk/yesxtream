@@ -30,6 +30,36 @@ import '../providers/provider_manager.dart';
 import '../../data/datasources/remote/xtream_client.dart';
 import 'channel_debug_dialog.dart';
 
+class _LiveChannelsSnapshot {
+  final String? providerId;
+  final List<db.Channel> allChannels;
+  final Map<String, db.Channel> channelById;
+  final List<db.Provider> providers;
+  final List<db.FavoriteList> favoriteLists;
+  final Set<String> favoritedChannelIds;
+  final List<String> groups;
+  final Map<String, int> groupCounts;
+  final Map<String, String> vanityNames;
+  final List<db.FailoverGroup> failoverGroups;
+  final Map<int, List<String>> failoverGroupMembers;
+  final Map<String, List<db.FailoverGroupMembership>> failoverGroupIndex;
+
+  const _LiveChannelsSnapshot({
+    required this.providerId,
+    required this.allChannels,
+    required this.channelById,
+    required this.providers,
+    required this.favoriteLists,
+    required this.favoritedChannelIds,
+    required this.groups,
+    required this.groupCounts,
+    required this.vanityNames,
+    required this.failoverGroups,
+    required this.failoverGroupMembers,
+    required this.failoverGroupIndex,
+  });
+}
+
 class ChannelsScreen extends ConsumerStatefulWidget {
   const ChannelsScreen({super.key});
 
@@ -39,10 +69,17 @@ class ChannelsScreen extends ConsumerStatefulWidget {
 
 class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
   static bool _updateCheckDone = false;
+  static bool _logoResolveTriggered = false;
+  static final Set<String> _autoRefreshedProviders = {};
+  static _LiveChannelsSnapshot? _liveCache;
+
   bool _initialLoadDone = false;
   String _loadStatus = '';
   bool _epgLoading = false;
+  String? _loadedProviderId;
+  String _lastProvidersSig = '';
   List<db.Channel> _allChannels = [];
+  Map<String, db.Channel> _channelById = {};
   List<db.Channel> _filteredChannels = [];
   List<String> _groups = [];
   Map<String, int> _groupCounts = {};
@@ -51,6 +88,7 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
   // _showSearch removed — search bar is always visible in the top navbar
   int _selectedIndex = -1;
   db.Channel? _previewChannel;
+  final ValueNotifier<db.Channel?> _highlightedChannelNotifier = ValueNotifier<db.Channel?>(null);
   List<db.EpgProgramme> _nowPlaying = [];
   final Map<String, List<XtreamEpgEntry>> _liveEpgCache = {};
   final Set<String> _fetchingEpgChannelIds = {};
@@ -98,6 +136,8 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
   bool _sidebarExpanded = true;
   Set<String> _expandedSections = {'favorites'};
   final _sidebarSearchController = TextEditingController();
+  final _sidebarSearchFocusNode = FocusNode(debugLabel: 'sidebar-search');
+  final _channelSearchFocusNode = FocusNode(debugLabel: 'channel-search');
   final _sidebarFocusNode = FocusScopeNode(debugLabel: 'sidebar');
   final _sidebarAllItemFocusNode = FocusNode(debugLabel: 'sidebar-all');
   final _firstChannelFocusNode = FocusNode(debugLabel: 'channel-first');
@@ -182,13 +222,42 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
     super.initState();
     _playerService = ref.read(playerServiceProvider);
     _guideScrollController = ScrollController();
-    _loadChannels();
+    _sidebarSearchFocusNode.skipTraversal = _isTvNav;
+    _channelSearchFocusNode.skipTraversal = _isTvNav;
+
+    final activeId = ref.read(activePlaylistProvider)?.id;
+    final cached = _liveCache;
+    if (cached != null && cached.providerId == activeId && cached.allChannels.isNotEmpty) {
+      _loadedProviderId = cached.providerId;
+      _initialLoadDone = true;
+      _allChannels = cached.allChannels;
+      _channelById = cached.channelById;
+      _providers = cached.providers;
+      _lastProvidersSig = cached.providers.map((p) => '${p.id}:${p.name}:${p.url}').join('|');
+      _favoriteLists = cached.favoriteLists;
+      _favoritedChannelIds = cached.favoritedChannelIds;
+      _groups = cached.groups;
+      _groupCounts = cached.groupCounts;
+      _vanityNames = cached.vanityNames;
+      _failoverGroups = cached.failoverGroups;
+      _failoverGroupMembers = cached.failoverGroupMembers;
+      _failoverGroupIndex = cached.failoverGroupIndex;
+      _applyFilters();
+      _restoreSession();
+      _loadChannels(silent: true);
+    } else {
+      _loadChannels();
+    }
+
     _ensureEpgSources();
     _startTopBarFade();
     _initFailoverListener();
     _loadSearchHistory();
-    // Resolve missing logos on startup (in background)
-    ref.read(providerManagerProvider).resolveAllMissingLogos().catchError((_) {});
+    // Resolve missing logos at most once per app session
+    if (!_logoResolveTriggered) {
+      _logoResolveTriggered = true;
+      ref.read(providerManagerProvider).resolveAllMissingLogos().catchError((_) {});
+    }
     // Auto-failover toast
     final ps = ref.read(playerServiceProvider);
     ps.onFailover = (message) {
@@ -211,6 +280,7 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
               _selectedIndex = idx;
               _previewChannel = _filteredChannels[idx];
             });
+            _highlightedChannelNotifier.value = _filteredChannels[idx];
             if (_channelListController.hasClients) {
               _scrollToIndex(idx);
             }
@@ -218,17 +288,19 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
         }
       }
     };
-    // Watch providers table — reload when providers or channels change
+    // Watch providers table only (never watch the 50k-row channels table)
     final database = ref.read(databaseProvider);
     Timer? debounce;
-    void debouncedReload() {
+    _providersSub = database.select(database.providers).watch().listen((providersList) {
+      final sig = providersList.map((p) => '${p.id}:${p.name}:${p.url}').join('|');
+      if (_lastProvidersSig.isNotEmpty && sig == _lastProvidersSig) return;
+      _lastProvidersSig = sig;
+      _liveCache = null;
       debounce?.cancel();
       debounce = Timer(const Duration(milliseconds: 500), () {
-        if (mounted) _loadChannels();
+        if (mounted) _loadChannels(silent: _initialLoadDone);
       });
-    }
-    _providersSub = database.select(database.providers).watch().listen((_) => debouncedReload());
-    _channelsSub = database.select(database.channels).watch().listen((_) => debouncedReload());
+    });
     // Refresh now-playing every 60 seconds so the info panel stays current
     _nowPlayingTimer = Timer.periodic(const Duration(seconds: 60), (_) => _refreshNowPlaying());
   }
@@ -577,11 +649,14 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
     _compactSearchController.dispose();
     _searchFocusNode.dispose();
     _sidebarSearchController.dispose();
+    _sidebarSearchFocusNode.dispose();
+    _channelSearchFocusNode.dispose();
     _sidebarFocusNode.dispose();
     _sidebarAllItemFocusNode.dispose();
     _firstChannelFocusNode.dispose();
     _channelListController.dispose();
     _guideScrollController.dispose();
+    _highlightedChannelNotifier.dispose();
     _guideIdleTimer?.cancel();
     _searchDebounce?.cancel();
     _overlayTimer?.cancel();
@@ -599,12 +674,14 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
     super.dispose();
   }
 
-  Future<void> _loadChannels() async {
+  Future<void> _loadChannels({bool silent = false}) async {
     final database = ref.read(databaseProvider);
     final activePlaylist = ref.read(activePlaylistProvider);
     final isFirstLoad = _allChannels.isEmpty;
 
-    if (mounted) setState(() => _loadStatus = 'Loading channels…');
+    if (!silent && !_initialLoadDone && mounted) {
+      setState(() => _loadStatus = 'Loading channels…');
+    }
     String? targetProviderId = activePlaylist?.id;
     if (targetProviderId == null) {
       final allProv = await database.getAllProviders();
@@ -631,10 +708,15 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
     final liveGroupCounts = results[5] as Map<String, int>;
     final foGroups = results[6] as List<db.FailoverGroup>;
 
-    // Auto-repair: if channels exist but have 0 categories due to old import bug, refresh in background
-    if (targetProviderId != null && liveChannels.isNotEmpty && liveGroupCounts.isEmpty) {
+    // Auto-repair once per session if channels exist without category counts
+    if (targetProviderId != null &&
+        liveChannels.isNotEmpty &&
+        liveGroupCounts.isEmpty &&
+        !_autoRefreshedProviders.contains(targetProviderId)) {
+      _autoRefreshedProviders.add(targetProviderId);
       ref.read(providerManagerProvider).refreshProvider(targetProviderId).then((_) {
-        if (mounted) _loadChannels();
+        _liveCache = null;
+        if (mounted) _loadChannels(silent: _initialLoadDone);
       }).catchError((_) {});
     }
 
@@ -648,6 +730,9 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
     }
 
     final sortedGroups = liveGroupCounts.keys.toList()..sort();
+    final channelById = <String, db.Channel>{
+      for (final c in liveChannels) c.id: c,
+    };
 
     final foGroupMembers = <int, List<String>>{};
     for (final g in foGroups) {
@@ -657,9 +742,27 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
     final foGroupIndex = await database.getFailoverGroupIndex();
 
     if (!mounted) return;
+    _loadedProviderId = targetProviderId;
+    _lastProvidersSig = providers.map((p) => '${p.id}:${p.name}:${p.url}').join('|');
+    _liveCache = _LiveChannelsSnapshot(
+      providerId: targetProviderId,
+      allChannels: liveChannels,
+      channelById: channelById,
+      providers: providers,
+      favoriteLists: favLists,
+      favoritedChannelIds: favChannelIds,
+      groups: sortedGroups,
+      groupCounts: liveGroupCounts,
+      vanityNames: Map<String, String>.from(_vanityNames),
+      failoverGroups: foGroups,
+      failoverGroupMembers: foGroupMembers,
+      failoverGroupIndex: foGroupIndex,
+    );
+
     setState(() {
       _initialLoadDone = true;
       _allChannels = liveChannels;
+      _channelById = channelById;
       _providers = providers;
       _favoriteLists = favLists;
       _favoritedChannelIds = favChannelIds;
@@ -689,6 +792,9 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
     final newChannels = channels.where((c) => !existingIds.contains(c.id)).toList();
     setState(() {
       _allChannels = [..._allChannels, ...newChannels];
+      for (final c in newChannels) {
+        _channelById[c.id] = c;
+      }
       _applyFilters();
     });
   }
@@ -1028,15 +1134,34 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
     }
   }
 
-  void _selectChannel(int index, {bool forcePlay = false}) {
+  /// Lightweight instant highlight on TV D-pad focus movement: updates the
+  /// preview metadata header immediately without rebuilding the channel list
+  /// or starting video streams until focus rests cleanly.
+  void _onChannelFocused(int index, db.Channel channel) {
+    _highlightedChannelNotifier.value = channel;
+    _focusSelectTimer?.cancel();
+    _focusSelectTimer = Timer(const Duration(milliseconds: 550), () {
+      if (!mounted) return;
+      if (index < _filteredChannels.length && _filteredChannels[index].id == channel.id) {
+        _selectChannel(index, fromFocus: true);
+      }
+    });
+  }
+
+  void _selectChannel(int index, {bool forcePlay = false, bool fromFocus = false}) {
     if (index < 0 || index >= _filteredChannels.length) return;
     final channel = _filteredChannels[index];
     final isSameChannel = index == _selectedIndex;
 
-    setState(() {
-      _selectedIndex = index;
-      _previewChannel = channel;
-    });
+    if (fromFocus && isSameChannel) return;
+
+    _highlightedChannelNotifier.value = channel;
+    if (_selectedIndex != index || _previewChannel?.id != channel.id) {
+      setState(() {
+        _selectedIndex = index;
+        _previewChannel = channel;
+      });
+    }
     _fetchLiveEpgForChannel(channel);
 
     final autoPreview = ref.read(appSettingsProvider).autoPreview;
@@ -1051,8 +1176,8 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
 
     final playerService = ref.read(playerServiceProvider);
 
-    // If already playing this channel and user presses OK / taps again, go fullscreen
-    if (isSameChannel && !forcePlay && playerService.player.state.playing) {
+    // If already playing this channel and user explicitly taps/selects again, go fullscreen
+    if (isSameChannel && !forcePlay && !fromFocus && playerService.player.state.playing) {
       _goFullscreen(channel);
       return;
     }
@@ -1068,12 +1193,8 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
     if (groupMemberships != null && groupMemberships.isNotEmpty) {
       final groupId = groupMemberships.first.group.id;
       final memberIds = _failoverGroupMembers[groupId] ?? [];
-      final channelById = <String, db.Channel>{};
-      for (final c in _allChannels) {
-        channelById[c.id] = c;
-      }
       failoverUrls = memberIds
-          .map((id) => channelById[id]?.streamUrl)
+          .map((id) => _channelById[id]?.streamUrl)
           .whereType<String>()
           .where((url) => url != channel.streamUrl)
           .toList();
@@ -1546,8 +1667,9 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
   @override
   Widget build(BuildContext context) {
     ref.listen<db.Provider?>(activePlaylistProvider, (prev, next) {
-      if (prev?.id != next?.id) {
-        _loadChannels();
+      if (next != null && next.id != _loadedProviderId) {
+        _liveCache = null;
+        _loadChannels(silent: _initialLoadDone);
       }
     });
 
@@ -1673,7 +1795,11 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
                                   left: BorderSide(color: Color(0xFF1E1E2E), width: 1),
                                 ),
                               ),
-                              child: _buildThreeColumnPreviewPanel(),
+                              child: ValueListenableBuilder<db.Channel?>(
+                                valueListenable: _highlightedChannelNotifier,
+                                builder: (context, highlighted, _) =>
+                                    _buildThreeColumnPreviewPanel(highlightedOverride: highlighted),
+                              ),
                             ),
                           ),
                         ],
@@ -1693,13 +1819,15 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
                         color: const Color(0xFF10101A).withValues(alpha: 0.95),
                         borderRadius: BorderRadius.circular(16),
                         border: Border.all(color: const Color(0xFFA78BFA), width: 2.5),
-                        boxShadow: const [
-                          BoxShadow(
-                            color: Color(0xBB8B5CF6),
-                            blurRadius: 22,
-                            spreadRadius: 3,
-                          ),
-                        ],
+                        boxShadow: PlatformInfo.isTV
+                            ? null
+                            : const [
+                                BoxShadow(
+                                  color: Color(0xBB8B5CF6),
+                                  blurRadius: 22,
+                                  spreadRadius: 3,
+                                ),
+                              ],
                       ),
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
@@ -2565,11 +2693,17 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
   }
 
   /// Right column: Preview panel in 3-column Live TV browser.
-  Widget _buildThreeColumnPreviewPanel() {
+  Widget _buildThreeColumnPreviewPanel({db.Channel? highlightedOverride}) {
     final playerService = ref.watch(playerServiceProvider);
-    final channel = _previewChannel ?? (_filteredChannels.isNotEmpty ? _filteredChannels.first : null);
+    final channel = highlightedOverride ??
+        _previewChannel ??
+        (_filteredChannels.isNotEmpty ? _filteredChannels.first : null);
 
-    if (channel != null && !_liveEpgCache.containsKey(channel.id) && !_fetchingEpgChannelIds.contains(channel.id)) {
+    final isSettledChannel = highlightedOverride == null || highlightedOverride.id == _previewChannel?.id;
+    if (channel != null &&
+        isSettledChannel &&
+        !_liveEpgCache.containsKey(channel.id) &&
+        !_fetchingEpgChannelIds.contains(channel.id)) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _fetchLiveEpgForChannel(channel);
       });
@@ -3331,7 +3465,7 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
   Widget _buildSidebar() {
     final width = _sidebarExpanded ? double.infinity : 44.0;
     return AnimatedContainer(
-      duration: const Duration(milliseconds: 200),
+      duration: Duration(milliseconds: _isTvNav ? 0 : 200),
       width: width,
       clipBehavior: Clip.hardEdge,
       decoration: const BoxDecoration(
@@ -3343,26 +3477,30 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
         child: Column(
           children: [
           // Toggle button
-          InkWell(
-            onTap: () => setState(() => _sidebarExpanded = !_sidebarExpanded),
-            child: Container(
-              height: 36,
-              padding: const EdgeInsets.symmetric(horizontal: 8),
-              alignment: _sidebarExpanded ? Alignment.centerRight : Alignment.center,
-              child: Icon(
-                _sidebarExpanded ? Icons.chevron_left_rounded : Icons.chevron_right_rounded,
-                color: Colors.white38,
-                size: 20,
+          ExcludeFocus(
+            excluding: _isTvNav,
+            child: InkWell(
+              onTap: () => setState(() => _sidebarExpanded = !_sidebarExpanded),
+              child: Container(
+                height: 36,
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                alignment: _sidebarExpanded ? Alignment.centerRight : Alignment.center,
+                child: Icon(
+                  _sidebarExpanded ? Icons.chevron_left_rounded : Icons.chevron_right_rounded,
+                  color: Colors.white38,
+                  size: 20,
+                ),
               ),
             ),
           ),
           if (_sidebarExpanded) ...[
-            // Search field in sidebar
+            // Search field in sidebar (excluded from D-pad arrow traversal on TV)
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
               child: SizedBox(
                 height: 32,
                 child: TextFormField(
+                  focusNode: _sidebarSearchFocusNode,
                   controller: _sidebarSearchController,
                   style: const TextStyle(color: Colors.white, fontSize: 12),
                   decoration: InputDecoration(
@@ -3545,37 +3683,56 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
         ? _groups
         : _groups.where((g) => g.toLowerCase().contains(q)).toList();
 
-    return ListView(
+    final items = <({
+      String title,
+      String filterKey,
+      int count,
+      IconData? icon,
+      FocusNode? focusNode,
+    })>[
+      if (q.isEmpty || 'favorites'.contains(q) || 'favoris'.contains(q))
+        (
+          title: 'Favorites',
+          filterKey: 'Favorites',
+          count: favCount,
+          icon: Icons.star_rounded,
+          focusNode: null,
+        ),
+      if (q.isEmpty || 'all'.contains(q) || 'tout'.contains(q))
+        (
+          title: 'All',
+          filterKey: 'All',
+          count: allCount,
+          icon: Icons.grid_view_rounded,
+          focusNode: _sidebarAllItemFocusNode,
+        ),
+      for (final group in filteredGroups)
+        (
+          title: group,
+          filterKey: group,
+          count: _groupCounts[group] ?? 0,
+          icon: null,
+          focusNode: null,
+        ),
+    ];
+
+    final rowHeight = _isTvNav ? 48.0 : 42.0;
+    return ListView.builder(
       padding: EdgeInsets.zero,
-      children: [
-        // 1. Favorites
-        if (q.isEmpty || 'favorites'.contains(q) || 'favoris'.contains(q))
-          _buildCategoryRow(
-            title: 'Favorites',
-            filterKey: 'Favorites',
-            count: favCount,
-            icon: Icons.star_rounded,
-          ),
-
-        // 2. All Channels
-        if (q.isEmpty || 'all'.contains(q) || 'tout'.contains(q))
-          _buildCategoryRow(
-            title: 'All',
-            filterKey: 'All',
-            count: allCount,
-            icon: Icons.grid_view_rounded,
-            focusNode: _sidebarAllItemFocusNode,
-          ),
-
-        // 3. Category Groups (from IPTV provider)
-        for (final group in filteredGroups)
-          _buildCategoryRow(
-            title: group,
-            filterKey: group,
-            count: _groupCounts[group] ?? 0,
-            icon: null,
-          ),
-      ],
+      cacheExtent: 300,
+      itemExtent: rowHeight,
+      itemCount: items.length,
+      itemBuilder: (context, index) {
+        final item = items[index];
+        return _buildCategoryRow(
+          title: item.title,
+          filterKey: item.filterKey,
+          count: item.count,
+          icon: item.icon,
+          focusNode: item.focusNode,
+          rowHeight: rowHeight,
+        );
+      },
     );
   }
 
@@ -3585,64 +3742,119 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
     required int count,
     IconData? icon,
     FocusNode? focusNode,
+    double rowHeight = 42.0,
   }) {
     final isSelected = _selectedGroup == filterKey;
-    return InkWell(
-      focusNode: focusNode,
-      onTap: () {
-        setState(() {
-          _clearSearch();
-          _selectedGroup = filterKey;
-          _applyFilters();
-        });
-        _saveSession();
-      },
-      child: Container(
-        height: 42,
-        padding: const EdgeInsets.symmetric(horizontal: 14),
-        decoration: BoxDecoration(
-          color: isSelected
-              ? const Color(0xFF6C5CE7).withValues(alpha: 0.22)
-              : Colors.transparent,
-          border: Border(
-            bottom: const BorderSide(color: Color(0xFF1E1D2F), width: 1),
-            left: isSelected
-                ? const BorderSide(color: Color(0xFFFFD32A), width: 3.5)
-                : BorderSide.none,
-          ),
-        ),
-        child: Row(
-          children: [
-            if (icon != null) ...[
-              Icon(
-                icon,
-                size: 15,
-                color: isSelected ? const Color(0xFFFFD32A) : const Color(0xFF6C5CE7),
-              ),
-              const SizedBox(width: 8),
-            ],
-            Expanded(
-              child: Text(
-                title,
-                style: TextStyle(
-                  color: isSelected ? const Color(0xFFFFD32A) : Colors.white,
-                  fontSize: 13,
-                  fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+    return RepaintBoundary(
+      child: Focus(
+        focusNode: focusNode,
+        onKeyEvent: (node, event) {
+          if (event is! KeyDownEvent) return KeyEventResult.ignored;
+          final key = event.logicalKey;
+          if (key == LogicalKeyboardKey.arrowRight) {
+            if (_selectedGroup != filterKey) {
+              setState(() {
+                _clearSearch();
+                _selectedGroup = filterKey;
+                _applyFilters();
+              });
+              _saveSession();
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (mounted && _firstChannelFocusNode.context != null) {
+                  _firstChannelFocusNode.requestFocus();
+                }
+              });
+            } else if (_firstChannelFocusNode.context != null) {
+              _firstChannelFocusNode.requestFocus();
+            }
+            return KeyEventResult.handled;
+          }
+          if (key == LogicalKeyboardKey.select ||
+              key == LogicalKeyboardKey.enter ||
+              key == LogicalKeyboardKey.gameButtonA) {
+            setState(() {
+              _clearSearch();
+              _selectedGroup = filterKey;
+              _applyFilters();
+            });
+            _saveSession();
+            return KeyEventResult.handled;
+          }
+          return KeyEventResult.ignored;
+        },
+        child: Builder(
+          builder: (context) {
+            final hasFocus = Focus.of(context).hasFocus;
+            return InkWell(
+              canRequestFocus: false,
+              onTap: () {
+                setState(() {
+                  _clearSearch();
+                  _selectedGroup = filterKey;
+                  _applyFilters();
+                });
+                _saveSession();
+              },
+              child: Container(
+                height: rowHeight,
+                padding: const EdgeInsets.symmetric(horizontal: 14),
+                decoration: BoxDecoration(
+                  color: hasFocus
+                      ? const Color(0xFF6C5CE7).withValues(alpha: 0.30)
+                      : (isSelected
+                          ? const Color(0xFF6C5CE7).withValues(alpha: 0.20)
+                          : Colors.transparent),
+                  border: Border(
+                    bottom: const BorderSide(color: Color(0xFF1E1D2F), width: 1),
+                    left: hasFocus
+                        ? const BorderSide(color: Colors.white, width: 3.5)
+                        : (isSelected
+                            ? const BorderSide(color: Color(0xFFFFD32A), width: 3.5)
+                            : BorderSide.none),
+                  ),
                 ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
+                child: Row(
+                  children: [
+                    if (icon != null) ...[
+                      Icon(
+                        icon,
+                        size: 15,
+                        color: hasFocus
+                            ? Colors.white
+                            : (isSelected ? const Color(0xFFFFD32A) : const Color(0xFF6C5CE7)),
+                      ),
+                      const SizedBox(width: 8),
+                    ],
+                    Expanded(
+                      child: Text(
+                        title,
+                        style: TextStyle(
+                          color: hasFocus
+                              ? Colors.white
+                              : (isSelected ? const Color(0xFFFFD32A) : Colors.white),
+                          fontSize: _isTvNav ? 14 : 13,
+                          fontWeight: (isSelected || hasFocus) ? FontWeight.bold : FontWeight.w500,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      '$count',
+                      style: TextStyle(
+                        color: hasFocus
+                            ? Colors.white
+                            : (isSelected ? const Color(0xFFFFD32A) : Colors.white38),
+                        fontSize: 12,
+                        fontWeight: (isSelected || hasFocus) ? FontWeight.bold : FontWeight.normal,
+                      ),
+                    ),
+                  ],
+                ),
               ),
-            ),
-            const SizedBox(width: 8),
-            Text(
-              '$count',
-              style: TextStyle(
-                color: isSelected ? const Color(0xFFFFD32A) : Colors.white38,
-                fontSize: 12,
-                fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-              ),
-            ),
-          ],
+            );
+          },
         ),
       ),
     );
@@ -4048,14 +4260,10 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
     // Build failover group rows to show above the channel list
     final failoverGroupWidgets = <Widget>[];
     if (_failoverGroups.isNotEmpty && !_multiSelectMode && _searchQuery.isEmpty && _sidebarSearchQuery.isEmpty) {
-      final channelById = <String, db.Channel>{};
-      for (final c in _allChannels) {
-        channelById[c.id] = c;
-      }
       for (final group in _failoverGroups) {
         final memberIds = _failoverGroupMembers[group.id] ?? [];
         final members = memberIds
-            .map((id) => channelById[id])
+            .map((id) => _channelById[id])
             .whereType<db.Channel>()
             .toList();
         if (members.isNotEmpty) {
@@ -4101,10 +4309,7 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
                 autofocus: index == 0 && _isTvNav,
                 onFocusChange: (hasFocus) {
                   if (hasFocus && _isTvNav) {
-                    _focusSelectTimer?.cancel();
-                    _focusSelectTimer = Timer(const Duration(milliseconds: 220), () {
-                      if (mounted) _selectChannel(index);
-                    });
+                    _onChannelFocused(index, channel);
                   }
                 },
                 onKeyEvent: (node, event) {
@@ -4151,7 +4356,11 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
                         });
                       } else {
                         _focusSelectTimer?.cancel();
-                        _goFullscreen(channel);
+                        if (_selectedIndex == index) {
+                          _goFullscreen(channel);
+                        } else {
+                          _selectChannel(index, forcePlay: true);
+                        }
                       }
                       return KeyEventResult.handled;
                     }
@@ -4170,7 +4379,11 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
                       });
                     } else {
                       _focusSelectTimer?.cancel();
-                      _goFullscreen(channel);
+                      if (_selectedIndex == index) {
+                        _goFullscreen(channel);
+                      } else {
+                        _selectChannel(index, forcePlay: true);
+                      }
                     }
                     return KeyEventResult.handled;
                   }
@@ -4185,6 +4398,7 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
                     final focused = Focus.of(context).hasFocus;
                     final isMultiSelected = _multiSelectMode && _multiSelectedChannelIds.contains(channel.id);
                     return InkWell(
+                      canRequestFocus: false,
                       onTap: () {
                         if (_multiSelectMode) {
                           setState(() {
@@ -4263,6 +4477,8 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
                                         fit: BoxFit.contain,
                                         cacheWidth: 64,
                                         cacheHeight: 64,
+                                        gaplessPlayback: true,
+                                        filterQuality: FilterQuality.low,
                                         errorBuilder: (_, __, ___) => const Icon(Icons.tv, size: 14, color: Colors.white24),
                                       )
                                     : const Icon(Icons.tv, size: 14, color: Colors.white24),
@@ -4323,6 +4539,7 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
             ),
           ),
           child: TextField(
+            focusNode: _channelSearchFocusNode,
             controller: _searchController,
             style: const TextStyle(color: Colors.white, fontSize: 12),
             decoration: InputDecoration(
@@ -6025,7 +6242,7 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
                           focusNode: index == 0 ? _firstChannelFocusNode : null,
                           autofocus: index == 0 && _isTvNav,
                           onFocusChange: (hasFocus) {
-                            if (hasFocus && _isTvNav) _selectChannel(index);
+                            if (hasFocus && _isTvNav) _onChannelFocused(index, channel);
                           },
                           onKeyEvent: (node, event) {
                             final key = event.logicalKey;

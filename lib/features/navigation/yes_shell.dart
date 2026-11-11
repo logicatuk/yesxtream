@@ -245,7 +245,7 @@ class _YesShellState extends ConsumerState<YesShell> {
                       : (hasFocus ? Colors.white : Colors.white70),
                   fontSize: fontSize,
                   fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
-                  shadows: isSelected
+                  shadows: (!PlatformInfo.isTV && isSelected)
                       ? [
                           Shadow(
                             color: const Color(0xFFFFD32A).withValues(alpha: 0.5),

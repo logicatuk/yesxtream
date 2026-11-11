@@ -26,6 +26,7 @@ class _ParseArgs {
 class EpgRefreshService {
   final db.AppDatabase _db;
   final _uuid = const Uuid();
+  bool _isRefreshing = false;
 
   EpgRefreshService(this._db);
 
@@ -37,9 +38,13 @@ class EpgRefreshService {
 
     // Download XMLTV data
     final dio = Dio(BaseOptions(
-      headers: {
-        'User-Agent': 'clubTivi/1.0 IPTV Player (compatible; XMLTV fetcher)',
-      },
+      connectTimeout: const Duration(seconds: 15),
+      receiveTimeout: const Duration(seconds: 60),
+      headers: kIsWeb
+          ? null
+          : const {
+              'User-Agent': 'clubTivi/1.0 IPTV Player (compatible; XMLTV fetcher)',
+            },
     ));
     try {
       final response = await dio.get<List<int>>(
@@ -82,9 +87,9 @@ class EpgRefreshService {
         );
       }).toList();
       if (programmeCompanions.isNotEmpty) {
-        // Insert in batches of 5000 to avoid blocking the main thread
-        for (var i = 0; i < programmeCompanions.length; i += 5000) {
-          final end = (i + 5000).clamp(0, programmeCompanions.length);
+        // Insert in batches of 1000 to keep UI frame times responsive.
+        for (var i = 0; i < programmeCompanions.length; i += 1000) {
+          final end = (i + 1000).clamp(0, programmeCompanions.length);
           await _db.insertEpgProgrammes(programmeCompanions.sublist(i, end));
           // Yield to the event loop between batches
           await Future<void>.delayed(Duration.zero);
@@ -100,19 +105,29 @@ class EpgRefreshService {
 
   /// Refresh all enabled EPG sources (skips sources refreshed within the last 4 hours).
   Future<void> refreshAllSources({bool force = false}) async {
-    final sources = await _db.getAllEpgSources();
-    final now = DateTime.now();
-    for (final source in sources.where((s) => s.enabled)) {
-      if (!force && source.lastRefresh != null &&
-          now.difference(source.lastRefresh!).inHours < 4) {
-        debugPrint('[EPG] Skipping ${source.name} — refreshed ${now.difference(source.lastRefresh!).inMinutes}m ago');
-        continue;
+    // Web/Smart TV browsers lack background Isolates, so automatic 40MB XMLTV
+    // parsing blocks the single UI JS thread. Short EPG loads per channel on demand.
+    if (kIsWeb && !force) return;
+    if (_isRefreshing) return;
+    _isRefreshing = true;
+    try {
+      final sources = await _db.getAllEpgSources();
+      final now = DateTime.now();
+      for (final source in sources.where((s) => s.enabled)) {
+        if (!force &&
+            source.lastRefresh != null &&
+            now.difference(source.lastRefresh!).inHours < 4) {
+          debugPrint('[EPG] Skipping ${source.name} — refreshed ${now.difference(source.lastRefresh!).inMinutes}m ago');
+          continue;
+        }
+        try {
+          await refreshSource(source.id);
+        } catch (e) {
+          debugPrint('[EPG] Error refreshing ${source.name}: $e');
+        }
       }
-      try {
-        await refreshSource(source.id);
-      } catch (e) {
-        debugPrint('[EPG] Error refreshing ${source.name}: $e');
-      }
+    } finally {
+      _isRefreshing = false;
     }
   }
 
