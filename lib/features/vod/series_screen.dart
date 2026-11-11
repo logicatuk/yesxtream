@@ -265,65 +265,55 @@ class _SeriesScreenState extends ConsumerState<SeriesScreen> {
                 ),
                 child: Column(
                   children: [
-                    // Header: TV Icon + Back / Search
+                    // Header: Back / Search
                     Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 16, 16, 10),
-                      child: Column(
+                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 10),
+                      child: Row(
                         children: [
-                          const Icon(
-                            Icons.live_tv_rounded,
-                            size: 44,
-                            color: Colors.white,
+                          Expanded(
+                            child: InkWell(
+                              onTap: () => context.go('/home'),
+                              borderRadius: BorderRadius.circular(6),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(vertical: 6),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF1B1A2C),
+                                  borderRadius: BorderRadius.circular(6),
+                                  border: Border.all(color: const Color(0xFF2A2840)),
+                                ),
+                                child: Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    const Icon(Icons.arrow_back_rounded, size: 14, color: Colors.white70),
+                                    const SizedBox(width: 4),
+                                    Text(settings.tr('back'), style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                                  ],
+                                ),
+                              ),
+                            ),
                           ),
-                          const SizedBox(height: 12),
-                          Row(
-                            children: [
-                              Expanded(
-                                child: InkWell(
-                                  onTap: () => context.go('/home'),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: InkWell(
+                              onTap: () => context.go('/search'),
+                              borderRadius: BorderRadius.circular(6),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(vertical: 6),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF1B1A2C),
                                   borderRadius: BorderRadius.circular(6),
-                                  child: Container(
-                                    padding: const EdgeInsets.symmetric(vertical: 6),
-                                    decoration: BoxDecoration(
-                                      color: const Color(0xFF1B1A2C),
-                                      borderRadius: BorderRadius.circular(6),
-                                      border: Border.all(color: const Color(0xFF2A2840)),
-                                    ),
-                                    child: Row(
-                                      mainAxisAlignment: MainAxisAlignment.center,
-                                      children: [
-                                        const Icon(Icons.arrow_back_rounded, size: 14, color: Colors.white70),
-                                        const SizedBox(width: 4),
-                                        Text(settings.tr('back'), style: const TextStyle(color: Colors.white70, fontSize: 12)),
-                                      ],
-                                    ),
-                                  ),
+                                  border: Border.all(color: const Color(0xFF2A2840)),
+                                ),
+                                child: Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    const Icon(Icons.search_rounded, size: 14, color: Colors.white70),
+                                    const SizedBox(width: 4),
+                                    Text(settings.tr('search'), style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                                  ],
                                 ),
                               ),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: InkWell(
-                                  onTap: () => context.go('/search'),
-                                  borderRadius: BorderRadius.circular(6),
-                                  child: Container(
-                                    padding: const EdgeInsets.symmetric(vertical: 6),
-                                    decoration: BoxDecoration(
-                                      color: const Color(0xFF1B1A2C),
-                                      borderRadius: BorderRadius.circular(6),
-                                      border: Border.all(color: const Color(0xFF2A2840)),
-                                    ),
-                                    child: Row(
-                                      mainAxisAlignment: MainAxisAlignment.center,
-                                      children: [
-                                        const Icon(Icons.search_rounded, size: 14, color: Colors.white70),
-                                        const SizedBox(width: 4),
-                                        Text(settings.tr('search'), style: const TextStyle(color: Colors.white70, fontSize: 12)),
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ],
+                            ),
                           ),
                         ],
                       ),
