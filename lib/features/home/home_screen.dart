@@ -424,14 +424,16 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         // Adaptive spacing based on screen height
         final isVeryTall = availableHeight > 800;
         final isShort = availableHeight < 640;
-        final gap = isVeryTall ? 12.0 : (isShort ? 7.0 : 9.0);
+        final gap = isVeryTall ? 12.0 : (isShort ? 7.0 : 10.0);
+        final topPad = isShort ? 12.0 : (isVeryTall ? 26.0 : 18.0);
+        final bottomPad = isShort ? 8.0 : 14.0;
 
         return Padding(
-          padding: EdgeInsets.fromLTRB(hPad, isShort ? 6.0 : 12.0, hPad, 8.0),
+          padding: EdgeInsets.fromLTRB(hPad, topPad, hPad, bottomPad),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // ── Header: Logo + expiry pill, horizontally centered ──
+              // ── Header: Logo + expiry pill, horizontally centered with comfortable top room ──
               _buildHeader(activePlaylist, accountInfo, settings),
               SizedBox(height: gap),
 
