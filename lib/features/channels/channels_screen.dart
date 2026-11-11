@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io' show Directory, File, FileMode;
+import 'dart:io' show Directory, File;
 
 import 'package:drift/drift.dart' show Value;
 import 'package:file_picker/file_picker.dart';
@@ -118,6 +118,8 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
   StreamSubscription<List<db.Provider>>? _providersSub;
   StreamSubscription<List<db.Channel>>? _channelsSub;
   Timer? _failoverTimer;
+
+  bool get _isTvNav => PlatformInfo.isTV || PlatformInfo.isAndroid;
   db.Channel? _failoverSuggestion;
   bool _showFailoverBanner = false;
   static const _kFailoverEnabled = 'failover_enabled';
@@ -535,7 +537,7 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
 
   void _startTopBarFade() {
     _topBarTimer?.cancel();
-    if (_mouseInTopBar || PlatformInfo.isAndroid) return;
+    if (_mouseInTopBar || _isTvNav) return;
     _topBarTimer = Timer(const Duration(seconds: 3), () {
       if (mounted && !_mouseInTopBar) setState(() => _topBarOpacity = 0.0);
     });
@@ -1337,12 +1339,12 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
   // ---------------------------------------------------------------------------
 
   KeyEventResult _handleKeyEvent(KeyEvent event) {
-    // On Android/TV, arrow keys are used for D-pad focus navigation.
+    // On Android/TV (Android TV, LG webOS, Samsung Tizen), arrow keys are used for D-pad focus navigation.
     // Channel switching uses dedicated channelUp/channelDown keys.
-    final isAndroid = PlatformInfo.isAndroid;
+    final isTvInput = _isTvNav;
 
     // Open debug info dialog with 'D' key
-    if (!isAndroid && event.logicalKey == LogicalKeyboardKey.keyD) {
+    if (!isTvInput && event.logicalKey == LogicalKeyboardKey.keyD) {
       if (_previewChannel != null) {
         final ps = ref.read(playerServiceProvider);
         final alts = _getFailoverAlts(_previewChannel!);
@@ -1356,7 +1358,7 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
     }
 
     if (event.logicalKey == LogicalKeyboardKey.channelUp ||
-        (!isAndroid && event.logicalKey == LogicalKeyboardKey.arrowUp)) {
+        (!isTvInput && event.logicalKey == LogicalKeyboardKey.arrowUp)) {
       final newIndex = (_selectedIndex - 1).clamp(0, _filteredChannels.length - 1);
       if (newIndex != _selectedIndex) {
         _selectChannel(newIndex);
@@ -1366,7 +1368,7 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
     }
 
     if (event.logicalKey == LogicalKeyboardKey.channelDown ||
-        (!isAndroid && event.logicalKey == LogicalKeyboardKey.arrowDown)) {
+        (!isTvInput && event.logicalKey == LogicalKeyboardKey.arrowDown)) {
       final newIndex = (_selectedIndex + 1).clamp(0, _filteredChannels.length - 1);
       if (newIndex != _selectedIndex) {
         _selectChannel(newIndex);
@@ -1402,16 +1404,34 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
         _numberTimer?.cancel();
         return KeyEventResult.handled;
       }
-      _goBackChannel();
+      if (_multiSelectMode) {
+        setState(() {
+          _multiSelectMode = false;
+          _multiSelectedChannelIds.clear();
+        });
+        return KeyEventResult.handled;
+      }
+      if (_previousIndex >= 0 && _previousIndex < _filteredChannels.length) {
+        _goBackChannel();
+      } else {
+        try {
+          ref.read(playerServiceProvider).stop();
+        } catch (_) {}
+        if (context.canPop()) {
+          context.pop();
+        } else {
+          context.go('/home');
+        }
+      }
       return KeyEventResult.handled;
     }
 
-    if (!isAndroid && event.logicalKey == LogicalKeyboardKey.arrowLeft) {
+    if (!isTvInput && event.logicalKey == LogicalKeyboardKey.arrowLeft) {
       _adjustVolume(-5);
       return KeyEventResult.handled;
     }
 
-    if (!isAndroid && event.logicalKey == LogicalKeyboardKey.arrowRight) {
+    if (!isTvInput && event.logicalKey == LogicalKeyboardKey.arrowRight) {
       _adjustVolume(5);
       return KeyEventResult.handled;
     }
@@ -1540,12 +1560,30 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
 
     return PopScope(
       canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return;
+        if (_multiSelectMode) {
+          setState(() {
+            _multiSelectMode = false;
+            _multiSelectedChannelIds.clear();
+          });
+          return;
+        }
+        try {
+          ref.read(playerServiceProvider).stop();
+        } catch (_) {}
+        if (context.canPop()) {
+          context.pop();
+        } else {
+          context.go('/home');
+        }
+      },
       child: FocusTraversalGroup(
         policy: ReadingOrderTraversalPolicy(),
         child: Focus(
           focusNode: _focusNode,
-          autofocus: !PlatformInfo.isAndroid,
-          skipTraversal: PlatformInfo.isAndroid,
+          autofocus: !_isTvNav,
+          skipTraversal: _isTvNav,
           onKeyEvent: (node, event) {
             if (event is! KeyDownEvent) return KeyEventResult.ignored;
             if (_searchFocusNode.hasFocus) return KeyEventResult.ignored;
@@ -1676,7 +1714,7 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
         bottom: false,
         child: Column(
           children: [
-            if (!PlatformInfo.isAndroid) _buildTopBar(context),
+            if (!_isTvNav) _buildTopBar(context),
             const Expanded(
               child: Center(
                 child: Column(
@@ -3193,7 +3231,7 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
                               SizedBox(
                                 height: 28, width: 28,
                                 child: ExcludeFocus(
-                                  excluding: PlatformInfo.isAndroid,
+                                  excluding: _isTvNav,
                                   child: IconButton(
                                     onPressed: () {
                                       if (_previewChannel == null) return;
@@ -3215,7 +3253,7 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
                               SizedBox(
                                 height: 28, width: 28,
                                 child: ExcludeFocus(
-                                  excluding: PlatformInfo.isAndroid,
+                                  excluding: _isTvNav,
                                   child: IconButton(
                                     onPressed: () => _goFullscreen(_previewChannel!),
                                     icon: const Icon(Icons.fullscreen_rounded, size: 16),
@@ -3870,7 +3908,7 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
       onSecondaryTap: onSecondaryTap,
       child: Focus(
         focusNode: focusNode,
-        autofocus: isSelected && PlatformInfo.isAndroid,
+        autofocus: isSelected && _isTvNav,
         onKeyEvent: (node, event) {
           if (event is! KeyDownEvent) return KeyEventResult.ignored;
           if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
@@ -4034,9 +4072,9 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
             onSecondaryTapUp: (_) => _showFavoriteListSheet(channel),
             child: Focus(
               focusNode: index == 0 ? _firstChannelFocusNode : null,
-              autofocus: index == 0 && PlatformInfo.isAndroid,
+              autofocus: index == 0 && _isTvNav,
               onFocusChange: (hasFocus) {
-                if (hasFocus && PlatformInfo.isAndroid) _selectChannel(index);
+                if (hasFocus && _isTvNav) _selectChannel(index);
               },
               onKeyEvent: (node, event) {
                 final key = event.logicalKey;
@@ -4044,7 +4082,7 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
                     key == LogicalKeyboardKey.enter ||
                     key == LogicalKeyboardKey.gameButtonA;
 
-                if (PlatformInfo.isAndroid && isCenterKey) {
+                if (_isTvNav && isCenterKey) {
                   if (event is KeyDownEvent) {
                     _longPressChannelId = channel.id;
                     _longPressTimer?.cancel();
@@ -4615,7 +4653,7 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
             ),
           if (_failoverGroups.isNotEmpty) const SizedBox(width: 8),
           Focus(
-            autofocus: PlatformInfo.isAndroid,
+            autofocus: _isTvNav,
             child: Builder(
               builder: (ctx) {
                 final focused = Focus.of(ctx).hasFocus;
@@ -5946,9 +5984,9 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
                         final isSelected = index == _selectedIndex;
                         return Focus(
                           focusNode: index == 0 ? _firstChannelFocusNode : null,
-                          autofocus: index == 0 && PlatformInfo.isAndroid,
+                          autofocus: index == 0 && _isTvNav,
                           onFocusChange: (hasFocus) {
-                            if (hasFocus && PlatformInfo.isAndroid) _selectChannel(index);
+                            if (hasFocus && _isTvNav) _selectChannel(index);
                           },
                           onKeyEvent: (node, event) {
                             final key = event.logicalKey;
@@ -5957,7 +5995,7 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
                                 key == LogicalKeyboardKey.gameButtonA;
 
                             // Long-press CENTER on TV remote → enter/toggle multi-select
-                            if (PlatformInfo.isAndroid && isCenterKey) {
+                            if (_isTvNav && isCenterKey) {
                               if (event is KeyDownEvent) {
                                 _longPressChannelId = channel.id;
                                 _longPressTimer?.cancel();
@@ -6065,11 +6103,6 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
                                  rawPressed.contains(LogicalKeyboardKey.shiftRight) ||
                                  rawPressed.contains(LogicalKeyboardKey.metaLeft) ||
                                  rawPressed.contains(LogicalKeyboardKey.metaRight);
-                            try {
-                              File('/tmp/click_debug.log').writeAsStringSync(
-                                '${DateTime.now()} GUIDE-TAP ch=${channel.name} shift=$shiftOrCmd multiMode=$_multiSelectMode hw=${hwPressed.map((k) => k.debugName).join(",")}\n',
-                                mode: FileMode.append);
-                            } catch (_) {}
                             if (shiftOrCmd) {
                               setState(() {
                                 if (!_multiSelectMode) {
@@ -6099,7 +6132,7 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
                             channel, details.globalPosition,
                           ),
                           onLongPress: _multiSelectMode ? null : () {
-                            if (PlatformInfo.isAndroid) {
+                            if (_isTvNav) {
                               setState(() {
                                 _multiSelectMode = true;
                                 _multiSelectedChannelIds = {channel.id};

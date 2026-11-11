@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/localization/app_translations.dart';
@@ -114,7 +115,7 @@ class AppSettings {
     final isLiveStream = path.contains('/live/') || path.endsWith('.ts') || path.endsWith('.m3u8');
     if (!isLiveStream) return url;
 
-    if (streamFormat == 'm3u8') {
+    if (kIsWeb || streamFormat == 'm3u8') {
       if (path.endsWith('.ts')) {
         final newPath = '${path.substring(0, path.length - 3)}.m3u8';
         return uri.replace(path: newPath).toString();
@@ -170,7 +171,7 @@ class AppSettingsNotifier extends StateNotifier<AppSettings> {
       parentalControlsEnabled: prefs.getBool(_kParentalEnabled) ?? false,
       parentalPin: prefs.getString(_kParentalPin) ?? '',
       lockedCategories: prefs.getStringList(_kLockedCategories) ?? const [],
-      streamFormat: prefs.getString(_kStreamFormat) ?? 'ts',
+      streamFormat: prefs.getString(_kStreamFormat) ?? (kIsWeb ? 'm3u8' : 'ts'),
       epgTimeShiftHours: prefs.getInt(_kEpgTimeShift) ?? 0,
       hardwareAcceleration: prefs.getBool(_kHwAcc) ?? true,
       autoRefreshOnStartup: prefs.getBool(_kAutoRefreshStartup) ?? true,

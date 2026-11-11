@@ -50,6 +50,22 @@
 
   <script>
     // ── Smart TV Remote Control Support (Samsung Tizen & LG webOS) ──
+    window.yesxtreamExitApp = function() {
+      try {
+        if (window.tizen && window.tizen.application) {
+          window.tizen.application.getCurrentApplication().exit();
+          return;
+        }
+      } catch (e) {}
+      try {
+        if (window.webOS && typeof window.webOS.platformBack === 'function') {
+          window.webOS.platformBack();
+          return;
+        }
+      } catch (e) {}
+      try { window.close(); } catch (e) {}
+    };
+
     window.addEventListener('load', function() {
       // 1. Samsung Tizen Remote Key Registration
       if (window.tizen && window.tizen.tvinputdevice) {
@@ -57,7 +73,8 @@
           '0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
           'MediaPlay', 'MediaPause', 'MediaPlayPause', 'MediaStop',
           'MediaFastForward', 'MediaRewind',
-          'ChannelUp', 'ChannelDown', 'ColorF0Red', 'ColorF1Green'
+          'ChannelUp', 'ChannelDown', 'Info',
+          'ColorF0Red', 'ColorF1Green', 'ColorF2Yellow', 'ColorF3Blue'
         ];
         tizenKeys.forEach(function(k) {
           try {
@@ -66,20 +83,44 @@
         });
       }
 
-      // 2. LG webOS / Samsung Tizen Key Interceptor (Back & Return keys)
+      // 2. LG webOS / Samsung Tizen Key Interceptor (Back / Return / Exit keys)
+      var dispatchingEscape = false;
       window.addEventListener('keydown', function(e) {
+        if (dispatchingEscape) return;
+        // Samsung Tizen Exit key
+        if (e.keyCode === 10182) {
+          e.preventDefault();
+          window.yesxtreamExitApp();
+          return;
+        }
         // Tizen Return / Back: 10009, webOS Back: 461
         if (e.keyCode === 10009 || e.keyCode === 461) {
-          var evt = new KeyboardEvent('keydown', {
-            key: 'Escape',
-            code: 'Escape',
-            keyCode: 27,
-            which: 27,
-            bubbles: true
-          });
-          window.dispatchEvent(evt);
+          e.preventDefault();
+          dispatchingEscape = true;
+          try {
+            var downEvt = new KeyboardEvent('keydown', {
+              key: 'Escape',
+              code: 'Escape',
+              keyCode: 27,
+              which: 27,
+              bubbles: true,
+              cancelable: true
+            });
+            window.dispatchEvent(downEvt);
+            var upEvt = new KeyboardEvent('keyup', {
+              key: 'Escape',
+              code: 'Escape',
+              keyCode: 27,
+              which: 27,
+              bubbles: true,
+              cancelable: true
+            });
+            window.dispatchEvent(upEvt);
+          } finally {
+            dispatchingEscape = false;
+          }
         }
-      });
+      }, true);
     });
   </script>
 </head>

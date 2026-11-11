@@ -427,7 +427,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     if (event is! KeyDownEvent) return KeyEventResult.ignored;
 
     final key = event.logicalKey;
-    final isAndroid = PlatformInfo.isAndroid;
+    final isTvInput = PlatformInfo.isTV || PlatformInfo.isAndroid;
 
     // Numerical channel jumping via remote number keys (e.g. 1 0 5 -> jump to channel 105)
     final digit = _getDigitFromKey(key);
@@ -473,27 +473,35 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
       return KeyEventResult.handled;
     }
 
-    // Channel switching: use channelUp/Down on Android, arrows elsewhere
+    // Channel switching: use channelUp/Down on TV/Android, arrows elsewhere
     if (key == LogicalKeyboardKey.channelUp ||
-        (!isAndroid && key == LogicalKeyboardKey.arrowUp)) {
+        (!isTvInput && key == LogicalKeyboardKey.arrowUp)) {
       _switchChannel(-1);
       return KeyEventResult.handled;
     }
 
     if (key == LogicalKeyboardKey.channelDown ||
-        (!isAndroid && key == LogicalKeyboardKey.arrowDown)) {
+        (!isTvInput && key == LogicalKeyboardKey.arrowDown)) {
       _switchChannel(1);
       return KeyEventResult.handled;
     }
 
-    // Volume: only on non-Android (D-pad arrows needed for focus on Android)
-    if (!isAndroid && key == LogicalKeyboardKey.arrowLeft) {
+    // Volume: only on desktop (D-pad arrows needed for focus on TV/Android)
+    if (!isTvInput && key == LogicalKeyboardKey.arrowLeft) {
       _adjustVolume(-5);
       return KeyEventResult.handled;
     }
 
-    if (!isAndroid && key == LogicalKeyboardKey.arrowRight) {
+    if (!isTvInput && key == LogicalKeyboardKey.arrowRight) {
       _adjustVolume(5);
+      return KeyEventResult.handled;
+    }
+
+    if (key == LogicalKeyboardKey.mediaPlayPause ||
+        key == LogicalKeyboardKey.mediaPlay ||
+        key == LogicalKeyboardKey.mediaPause) {
+      _playerService?.player.playOrPause();
+      _toggleOverlay();
       return KeyEventResult.handled;
     }
 
@@ -610,7 +618,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     _overlayTimer?.cancel();
     _volumeTimer?.cancel();
     _numberTimer?.cancel();
-    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     super.dispose();
   }
 

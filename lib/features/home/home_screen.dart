@@ -7,6 +7,7 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/platform_info.dart';
+import '../../core/tv_exit_helper.dart';
 import '../../data/datasources/local/database.dart' as db;
 import '../../data/services/app_settings.dart';
 import '../playlists/playlist_providers.dart';
@@ -57,8 +58,23 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     final statsAsync = ref.watch(activePlaylistStatsProvider);
     final settings = ref.watch(appSettingsProvider);
 
-    return Scaffold(
-      backgroundColor: const Color(0xFF070712),
+    void handleHomeBack() {
+      if (ModalRoute.of(context)?.isCurrent != true) return;
+      _showExitDialog(context, settings);
+    }
+
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) handleHomeBack();
+      },
+      child: CallbackShortcuts(
+        bindings: {
+          const SingleActivator(LogicalKeyboardKey.escape): handleHomeBack,
+          const SingleActivator(LogicalKeyboardKey.goBack): handleHomeBack,
+        },
+        child: Scaffold(
+          backgroundColor: const Color(0xFF070712),
       body: playlistsAsync.when(
         loading: () => const Center(
           child: CircularProgressIndicator(color: Color(0xFF6C5CE7)),
@@ -175,6 +191,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             ],
           );
         },
+      ),
+        ),
       ),
     );
   }
@@ -1178,7 +1196,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                       onPressed: () {
                         Navigator.of(ctx).pop();
                         if (kIsWeb) {
-                          // On web/Smart TV browser, close or ignore
+                          exitSmartTvApp();
                         } else if (PlatformInfo.isAndroid || PlatformInfo.isIOS) {
                           SystemNavigator.pop();
                         } else {

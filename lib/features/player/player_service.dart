@@ -198,16 +198,20 @@ class PlayerService {
     await _ensureReady();
     await player.open(Media(
       effectiveUrl,
-      httpHeaders: const {
-        'User-Agent': 'IPTVSmartersPro/1.0.0 (Linux; Android 12)',
-      },
+      httpHeaders: kIsWeb
+          ? null
+          : const {
+              'User-Agent': 'IPTVSmartersPro/1.0.0 (Linux; Android 12)',
+            },
     ));
     await _bufferManager.applyForStream(effectiveUrl, this);
     await player.setVolume(100.0);
 
     // Check for missing audio after a brief delay and retry through
     // ffmpeg proxy if needed (fixes EAC-3 with non-standard codec tags)
-    _scheduleAudioCheck(url);
+    if (!kIsWeb) {
+      _scheduleAudioCheck(url);
+    }
 
     // Reset and start buffer tracking for the new stream
     bufferHistory.fillRange(0, 60, false);

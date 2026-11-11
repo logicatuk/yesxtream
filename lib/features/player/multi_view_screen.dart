@@ -82,7 +82,7 @@ class _MultiViewScreenState extends ConsumerState<MultiViewScreen> {
       ActivePlayerRegistry.unregister(cell.player);
       cell.player.dispose();
     }
-    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     super.dispose();
   }
 
@@ -91,6 +91,11 @@ class _MultiViewScreenState extends ConsumerState<MultiViewScreen> {
     return CallbackShortcuts(
       bindings: {
         const SingleActivator(LogicalKeyboardKey.escape): () {
+          Future.microtask(() {
+            Navigator.of(context).pop();
+          });
+        },
+        const SingleActivator(LogicalKeyboardKey.goBack): () {
           Future.microtask(() {
             Navigator.of(context).pop();
           });

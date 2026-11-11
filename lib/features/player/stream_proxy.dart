@@ -25,6 +25,7 @@ class StreamProxy {
   /// Start proxying a remote stream URL.
   /// Returns the local URL that mpv should play from.
   Future<String?> start(String remoteUrl) async {
+    if (kIsWeb) return null;
     // Stop any existing proxy
     await stop();
 

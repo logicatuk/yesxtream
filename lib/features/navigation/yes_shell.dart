@@ -195,36 +195,56 @@ class _YesShellState extends ConsumerState<YesShell> {
     required String route,
     required bool isSelected,
   }) {
-    return InkWell(
-      onTap: () {
-        if (!isSelected) {
-          if (route != '/live') {
-            try {
-              ref.read(playerServiceProvider).stop();
-            } catch (_) {}
-          }
-          context.go(route);
-        }
-      },
-      borderRadius: BorderRadius.circular(6),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-        child: Text(
-          title,
-          style: TextStyle(
-            color: isSelected ? const Color(0xFFFFD32A) : Colors.white70,
-            fontSize: 14,
-            fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
-            shadows: isSelected
-                ? [
-                    Shadow(
-                      color: const Color(0xFFFFD32A).withValues(alpha: 0.5),
-                      blurRadius: 10,
-                    ),
-                  ]
-                : null,
-          ),
-        ),
+    return Focus(
+      canRequestFocus: false,
+      child: Builder(
+        builder: (ctx) {
+          final hasFocus = Focus.of(ctx).hasFocus;
+          return InkWell(
+            onTap: () {
+              if (!isSelected) {
+                if (route != '/live') {
+                  try {
+                    ref.read(playerServiceProvider).stop();
+                  } catch (_) {}
+                }
+                context.go(route);
+              }
+            },
+            borderRadius: BorderRadius.circular(6),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(6),
+                color: hasFocus
+                    ? const Color(0xFF6C5CE7).withValues(alpha: 0.28)
+                    : Colors.transparent,
+                border: Border.all(
+                  color: hasFocus ? Colors.white : Colors.transparent,
+                  width: 1.5,
+                ),
+              ),
+              child: Text(
+                title,
+                style: TextStyle(
+                  color: isSelected
+                      ? const Color(0xFFFFD32A)
+                      : (hasFocus ? Colors.white : Colors.white70),
+                  fontSize: 14,
+                  fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+                  shadows: isSelected
+                      ? [
+                          Shadow(
+                            color: const Color(0xFFFFD32A).withValues(alpha: 0.5),
+                            blurRadius: 10,
+                          ),
+                        ]
+                      : null,
+                ),
+              ),
+            ),
+          );
+        },
       ),
     );
   }

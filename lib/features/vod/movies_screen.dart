@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:drift/drift.dart' hide Column;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../data/datasources/local/database.dart' as db;
@@ -233,9 +234,28 @@ class _MoviesScreenState extends ConsumerState<MoviesScreen> {
       return g.toLowerCase().contains(catQuery);
     }).toList();
 
-    return Scaffold(
-      backgroundColor: const Color(0xFF0A0A0F),
-      body: LayoutBuilder(
+    void handleBack() {
+      if (ModalRoute.of(context)?.isCurrent != true) return;
+      if (context.canPop()) {
+        context.pop();
+      } else {
+        context.go('/home');
+      }
+    }
+
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) handleBack();
+      },
+      child: CallbackShortcuts(
+        bindings: {
+          const SingleActivator(LogicalKeyboardKey.escape): handleBack,
+          const SingleActivator(LogicalKeyboardKey.goBack): handleBack,
+        },
+        child: Scaffold(
+          backgroundColor: const Color(0xFF0A0A0F),
+          body: LayoutBuilder(
         builder: (context, constraints) {
           final isCompact = constraints.maxWidth < 750;
           if (isCompact) {
@@ -444,6 +464,8 @@ class _MoviesScreenState extends ConsumerState<MoviesScreen> {
             ],
           );
         },
+      ),
+        ),
       ),
     );
   }
@@ -922,6 +944,7 @@ class _MovieCardState extends ConsumerState<_MovieCard> {
         history.progressFraction < 0.90;
 
     return Focus(
+      canRequestFocus: false,
       child: Builder(
         builder: (context) {
           final hasFocus = Focus.of(context).hasFocus;

@@ -34,8 +34,8 @@ class _SplashScreenState extends State<SplashScreen>
   static const _accent = Color(0xFF6C5CE7);
   static const _surface = Color(0xFF0A0A0F);
 
-  // TV mode: skip GPU-heavy effects (CustomPaint, shimmer, glow loop)
-  static final bool _isTV = !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
+  // TV mode: skip GPU-heavy effects (CustomPaint, shimmer, glow loop) on Android TV & Smart TV webOS/Tizen
+  static final bool _isTV = kIsWeb || defaultTargetPlatform == TargetPlatform.android;
 
   @override
   void initState() {

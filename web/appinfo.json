@@ -10,6 +10,7 @@
   "iconColor": "#6C5CE7",
   "resolution": "1920x1080",
   "handlesRelaunch": true,
+  "disableBackHistoryAPI": true,
   "requiredACG": [],
   "requiredPermissions": [
     "internet"

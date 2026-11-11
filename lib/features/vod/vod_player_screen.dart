@@ -241,9 +241,11 @@ class _VodPlayerScreenState extends ConsumerState<VodPlayerScreen> {
       await _player.setVolume(100.0);
       await _player.open(Media(
         url,
-        httpHeaders: const {
-          'User-Agent': 'IPTVSmartersPro/1.0.0 (Linux; Android 12)',
-        },
+        httpHeaders: kIsWeb
+            ? null
+            : const {
+                'User-Agent': 'IPTVSmartersPro/1.0.0 (Linux; Android 12)',
+              },
       ));
       if (initialMs > 1000) {
         // Wait for media duration to load before seeking to avoid seeking beyond 0 / EOF
@@ -406,22 +408,40 @@ class _VodPlayerScreenState extends ConsumerState<VodPlayerScreen> {
         ? '$_currentSeriesName • S${_currentSeasonNumber ?? 1} E${_currentEpisodeNumber ?? 1}${_currentEpisodeTitle != null ? ' - $_currentEpisodeTitle' : ''}'
         : _currentTitle;
 
+    void handleBack() {
+      if (_showEndPanel) {
+        _countdownTimer?.cancel();
+        setState(() => _showEndPanel = false);
+      } else {
+        Navigator.of(context).maybePop();
+      }
+    }
+
     return CallbackShortcuts(
       bindings: {
-        const SingleActivator(LogicalKeyboardKey.escape): () {
-          if (_showEndPanel) {
-            _countdownTimer?.cancel();
-            setState(() => _showEndPanel = false);
-          } else {
-            Navigator.of(context).maybePop();
-          }
-        },
+        const SingleActivator(LogicalKeyboardKey.escape): handleBack,
+        const SingleActivator(LogicalKeyboardKey.goBack): handleBack,
+        const SingleActivator(LogicalKeyboardKey.backspace): handleBack,
         const SingleActivator(LogicalKeyboardKey.space): () {
           _player.playOrPause();
           _resetOverlayTimer();
         },
+        const SingleActivator(LogicalKeyboardKey.mediaPlayPause): () {
+          _player.playOrPause();
+          _resetOverlayTimer();
+        },
+        const SingleActivator(LogicalKeyboardKey.mediaPlay): () {
+          _player.play();
+          _resetOverlayTimer();
+        },
+        const SingleActivator(LogicalKeyboardKey.mediaPause): () {
+          _player.pause();
+          _resetOverlayTimer();
+        },
         const SingleActivator(LogicalKeyboardKey.arrowLeft): () => _seekBy(-10),
         const SingleActivator(LogicalKeyboardKey.arrowRight): () => _seekBy(10),
+        const SingleActivator(LogicalKeyboardKey.mediaRewind): () => _seekBy(-10),
+        const SingleActivator(LogicalKeyboardKey.mediaFastForward): () => _seekBy(10),
       },
       child: Focus(
         autofocus: true,
