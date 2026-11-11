@@ -3,6 +3,7 @@ import 'dart:ui';
 
 import 'package:flutter/material.dart';
 
+import '../../core/platform_info.dart';
 import '../player/player_service.dart';
 
 /// Cable TV-style channel info banner that slides in when switching channels.
@@ -181,15 +182,34 @@ class _ChannelInfoOverlayState extends State<ChannelInfoOverlay>
         child: FadeTransition(
           opacity: _fadeAnimation,
           child: ClipRect(
-            child: BackdropFilter(
-              filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-              child: Container(
-                decoration: BoxDecoration(
-                  color: Colors.black.withValues(alpha: 0.75),
-                ),
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                child: Row(
+            child: PlatformInfo.isTV
+                ? Container(
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.85),
+                    ),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                    child: _buildOverlayRow(),
+                  )
+                : BackdropFilter(
+                    filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: Colors.black.withValues(alpha: 0.75),
+                      ),
+                      padding:
+                          const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                      child: _buildOverlayRow(),
+                    ),
+                  ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildOverlayRow() {
+    return Row(
                   children: [
                     // Provider name badge
                     if (widget.providerName != null && widget.providerName!.isNotEmpty)
@@ -285,13 +305,7 @@ class _ChannelInfoOverlayState extends State<ChannelInfoOverlay>
                           painter: _BufferingSparkline(_bufferHistory)),
                     ),
                   ],
-                ),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
+                );
   }
 
   Widget _badge(String label, Color bg, {Color textColor = Colors.white}) {

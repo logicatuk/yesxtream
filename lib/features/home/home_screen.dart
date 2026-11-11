@@ -95,35 +95,42 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             children: [
               // ── Background Gradient & Vignette (App Signature Palette) ──
               Positioned.fill(
-                child: Container(
-                  decoration: const BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                      colors: [
-                        Color(0xFF070716), // Deep midnight navy
-                        Color(0xFF0F0E26), // Dark royal purple
-                        Color(0xFF141232), // Rich indigo
-                        Color(0xFF080712), // Dark bottom
-                      ],
-                      stops: [0.0, 0.4, 0.75, 1.0],
-                    ),
-                  ),
-                ),
-              ),
-
-              // Soft ambient purple radial glow in the center
-              Positioned.fill(
-                child: Container(
-                  decoration: BoxDecoration(
-                    gradient: RadialGradient(
-                      center: const Alignment(0.0, 0.1),
-                      radius: 0.85,
-                      colors: [
-                        const Color(0xFF6C5CE7).withValues(alpha: 0.14),
-                        Colors.transparent,
-                      ],
-                    ),
+                child: RepaintBoundary(
+                  child: Stack(
+                    children: [
+                      Positioned.fill(
+                        child: Container(
+                          decoration: const BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                              colors: [
+                                Color(0xFF070716), // Deep midnight navy
+                                Color(0xFF0F0E26), // Dark royal purple
+                                Color(0xFF141232), // Rich indigo
+                                Color(0xFF080712), // Dark bottom
+                              ],
+                              stops: [0.0, 0.4, 0.75, 1.0],
+                            ),
+                          ),
+                        ),
+                      ),
+                      // Soft ambient purple radial glow in the center
+                      Positioned.fill(
+                        child: Container(
+                          decoration: BoxDecoration(
+                            gradient: RadialGradient(
+                              center: const Alignment(0.0, 0.1),
+                              radius: 0.85,
+                              colors: [
+                                const Color(0xFF6C5CE7).withValues(alpha: 0.14),
+                                Colors.transparent,
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ),
@@ -1334,7 +1341,7 @@ class _TvHeroTileState extends State<_TvHeroTile> {
   @override
   Widget build(BuildContext context) {
     final isTV = PlatformInfo.isTV;
-    final animDur = Duration(milliseconds: isTV ? 60 : 180);
+    final animDur = isTV ? Duration.zero : const Duration(milliseconds: 180);
     return FocusableActionDetector(
       autofocus: true,
       onFocusChange: (f) => setState(() => _isFocused = f),
@@ -1347,7 +1354,7 @@ class _TvHeroTileState extends State<_TvHeroTile> {
       child: GestureDetector(
         onTap: widget.onTap,
         child: AnimatedScale(
-          scale: _highlight ? 1.04 : 1.0,
+          scale: (!isTV && _highlight) ? 1.04 : 1.0,
           duration: animDur,
           curve: Curves.easeOutCubic,
           child: AnimatedContainer(
@@ -1367,16 +1374,16 @@ class _TvHeroTileState extends State<_TvHeroTile> {
                 color: _highlight
                     ? Colors.white
                     : const Color(0xFFA29BFE).withValues(alpha: 0.5),
-                width: _highlight ? (isTV ? 3.2 : 2.4) : 1.4,
+                width: _highlight ? (isTV ? 3.5 : 2.4) : 1.4,
               ),
-              boxShadow: isTV && !_highlight
+              boxShadow: isTV
                   ? null
                   : [
                       BoxShadow(
                         color: _highlight
                             ? const Color(0xFF6C5CE7).withValues(alpha: 0.6)
                             : const Color(0xFF6C5CE7).withValues(alpha: 0.35),
-                        blurRadius: isTV ? 12 : (_highlight ? 24 : 16),
+                        blurRadius: _highlight ? 24 : 16,
                         offset: const Offset(0, 6),
                       ),
                     ],
@@ -1528,7 +1535,7 @@ class _TvGridTileState extends State<_TvGridTile> {
       child: GestureDetector(
         onTap: widget.onTap,
         child: AnimatedScale(
-          scale: _highlight ? 1.04 : 1.0,
+          scale: (!isTV && _highlight) ? 1.04 : 1.0,
           duration: animDur,
           curve: Curves.easeOutCubic,
           child: AnimatedContainer(
@@ -1549,16 +1556,16 @@ class _TvGridTileState extends State<_TvGridTile> {
                 color: _highlight
                     ? Colors.white
                     : const Color(0xFF6C5CE7).withValues(alpha: 0.45),
-                width: _highlight ? (isTV ? 3.0 : 2.0) : 1.2,
+                width: _highlight ? (isTV ? 3.2 : 2.0) : 1.2,
               ),
-              boxShadow: isTV && !_highlight
+              boxShadow: isTV
                   ? null
                   : [
                       BoxShadow(
                         color: _highlight
                             ? const Color(0xFF6C5CE7).withValues(alpha: 0.5)
                             : const Color(0xFF4834D4).withValues(alpha: 0.25),
-                        blurRadius: isTV ? 10 : (_highlight ? 18 : 12),
+                        blurRadius: _highlight ? 18 : 12,
                         offset: const Offset(0, 4),
                       ),
                     ],
@@ -1668,7 +1675,7 @@ class _TvGridTileHorizontalState extends State<_TvGridTileHorizontal> {
       child: GestureDetector(
         onTap: widget.onTap,
         child: AnimatedScale(
-          scale: _highlight ? 1.04 : 1.0,
+          scale: (!isTV && _highlight) ? 1.04 : 1.0,
           duration: animDur,
           curve: Curves.easeOutCubic,
           child: AnimatedContainer(
@@ -1689,16 +1696,16 @@ class _TvGridTileHorizontalState extends State<_TvGridTileHorizontal> {
                 color: _highlight
                     ? Colors.white
                     : const Color(0xFF6C5CE7).withValues(alpha: 0.45),
-                width: _highlight ? (isTV ? 3.0 : 2.0) : 1.2,
+                width: _highlight ? (isTV ? 3.2 : 2.0) : 1.2,
               ),
-              boxShadow: isTV && !_highlight
+              boxShadow: isTV
                   ? null
                   : [
                       BoxShadow(
                         color: _highlight
                             ? const Color(0xFF6C5CE7).withValues(alpha: 0.5)
                             : const Color(0xFF4834D4).withValues(alpha: 0.25),
-                        blurRadius: isTV ? 10 : (_highlight ? 18 : 12),
+                        blurRadius: _highlight ? 18 : 12,
                         offset: const Offset(0, 4),
                       ),
                     ],
@@ -1763,7 +1770,7 @@ class _TvActionButtonState extends State<_TvActionButton> {
   @override
   Widget build(BuildContext context) {
     final isTV = PlatformInfo.isTV;
-    final animDur = Duration(milliseconds: isTV ? 60 : 180);
+    final animDur = isTV ? Duration.zero : const Duration(milliseconds: 180);
     return FocusableActionDetector(
       onFocusChange: (f) => setState(() => _isFocused = f),
       onShowHoverHighlight: isTV ? null : (h) => setState(() => _isHovered = h),
@@ -1775,7 +1782,7 @@ class _TvActionButtonState extends State<_TvActionButton> {
       child: GestureDetector(
         onTap: widget.onTap,
         child: AnimatedScale(
-          scale: _highlight ? 1.03 : 1.0,
+          scale: (!isTV && _highlight) ? 1.03 : 1.0,
           duration: animDur,
           curve: Curves.easeOutCubic,
           child: AnimatedContainer(
@@ -1792,16 +1799,16 @@ class _TvActionButtonState extends State<_TvActionButton> {
                 color: _highlight
                     ? Colors.white
                     : const Color(0xFF6C5CE7).withValues(alpha: 0.35),
-                width: _highlight ? (isTV ? 2.8 : 1.8) : 1.2,
+                width: _highlight ? (isTV ? 3.0 : 1.8) : 1.2,
               ),
-              boxShadow: isTV && !_highlight
+              boxShadow: isTV
                   ? null
                   : [
                       BoxShadow(
                         color: _highlight
                             ? const Color(0xFF6C5CE7).withValues(alpha: 0.4)
                             : Colors.black26,
-                        blurRadius: isTV ? 8 : (_highlight ? 14 : 6),
+                        blurRadius: _highlight ? 14 : 6,
                       ),
                     ],
             ),

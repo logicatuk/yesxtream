@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../playlists/playlist_providers.dart';
 import 'provider_manager.dart';
 
 /// Shows the Add Provider dialog.
@@ -39,6 +40,7 @@ class _AddProviderPageState extends ConsumerState<_AddProviderPage> {
   final _xtreamPass = TextEditingController();
 
   bool _loading = false;
+  String? _statusMessage;
 
   @override
   void dispose() {
@@ -77,33 +79,51 @@ class _AddProviderPageState extends ConsumerState<_AddProviderPage> {
 
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
+    void onProgress(int _, String msg) {
+      if (mounted) setState(() => _statusMessage = msg);
+    }
+
     if (_type == _ProviderType.m3u) {
-      await _addProvider(() {
+      final newId = _generateId(_m3uName.text.trim());
+      await _addProvider(newId, () {
         final manager = ref.read(providerManagerProvider);
         return manager.addM3uProvider(
-          id: _generateId(_m3uName.text.trim()),
+          id: newId,
           name: _m3uName.text.trim(),
           url: _m3uUrl.text.trim(),
+          onProgress: onProgress,
         );
       });
     } else {
-      await _addProvider(() {
+      final newId = _generateId(_xtreamName.text.trim());
+      await _addProvider(newId, () {
         final manager = ref.read(providerManagerProvider);
         return manager.addXtreamProvider(
-          id: _generateId(_xtreamName.text.trim()),
+          id: newId,
           name: _xtreamName.text.trim(),
           url: _xtreamUrl.text.trim(),
           username: _xtreamUser.text.trim(),
           password: _xtreamPass.text.trim(),
+          onProgress: onProgress,
         );
       });
     }
   }
 
-  Future<void> _addProvider(Future<void> Function() action) async {
-    setState(() => _loading = true);
+  Future<void> _addProvider(
+    String newId,
+    Future<void> Function() action,
+  ) async {
+    setState(() {
+      _loading = true;
+      _statusMessage = 'Connecting...';
+    });
     try {
       await action();
+      await ref.read(activePlaylistIdProvider.notifier).selectPlaylist(newId);
+      ref.invalidate(activePlaylistStatsProvider);
+      ref.invalidate(activePlaylistHasMoviesProvider);
+      ref.invalidate(activePlaylistHasSeriesProvider);
       if (!mounted) return;
       Navigator.of(context).pop(true);
       ScaffoldMessenger.of(context).showSnackBar(
@@ -142,7 +162,12 @@ class _AddProviderPageState extends ConsumerState<_AddProviderPage> {
         ),
       );
     } finally {
-      if (mounted) setState(() => _loading = false);
+      if (mounted) {
+        setState(() {
+          _loading = false;
+          _statusMessage = null;
+        });
+      }
     }
   }
 
@@ -309,13 +334,29 @@ class _AddProviderPageState extends ConsumerState<_AddProviderPage> {
         onPressed: _loading ? null : _submit,
         style: FilledButton.styleFrom(backgroundColor: accent),
         child: _loading
-            ? const SizedBox(
-                width: 24,
-                height: 24,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  color: Colors.white,
-                ),
+            ? Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Colors.white,
+                    ),
+                  ),
+                  if (_statusMessage != null) ...[
+                    const SizedBox(width: 12),
+                    Flexible(
+                      child: Text(
+                        _statusMessage!,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(color: Colors.white, fontSize: 14),
+                      ),
+                    ),
+                  ],
+                ],
               )
             : const Text('Add Provider', style: TextStyle(fontSize: 16)),
       ),

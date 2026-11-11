@@ -93,8 +93,7 @@ class _CatchupScreenState extends ConsumerState<CatchupScreen> {
     }
 
     final database = ref.read(databaseProvider);
-    final allChannels = await database.getChannelsForProvider(providerId);
-    final liveChannels = allChannels.where((c) => c.streamType == 'live').toList();
+    final liveChannels = await database.getLiveChannels(providerId: providerId);
 
     // Check provider info
     final provider = await (database.select(database.providers)

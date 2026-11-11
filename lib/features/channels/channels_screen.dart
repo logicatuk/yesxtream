@@ -682,7 +682,7 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
   Future<void> _loadProviderChannels(String providerId) async {
     if (_loadedProviders.contains(providerId)) return;
     final database = ref.read(databaseProvider);
-    final channels = await database.getChannelsForProvider(providerId);
+    final channels = await database.getLiveChannels(providerId: providerId);
     if (!mounted) return;
     _loadedProviders.add(providerId);
     final existingIds = _allChannels.map((c) => c.id).toSet();

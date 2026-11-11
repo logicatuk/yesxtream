@@ -82,28 +82,17 @@ class ProviderManager {
       throw Exception('No playable channels found in this M3U playlist.');
     }
 
-    onProgress?.call(4, 'Saving playlist to database...');
-    await _db.upsertProvider(db.ProvidersCompanion.insert(
-      id: id,
-      name: name,
-      type: 'm3u',
-      url: Value(url),
-    ));
-
-    await _db.upsertChannels(channels.map((c) => db.ChannelsCompanion.insert(
-      id: c.id,
-      providerId: c.providerId,
-      name: c.name,
-      tvgId: Value(c.tvgId),
-      tvgName: Value(c.tvgName),
-      tvgLogo: Value(c.tvgLogo),
-      groupTitle: Value(c.groupTitle),
-      channelNumber: Value(c.channelNumber),
-      streamUrl: c.streamUrl,
-      streamType: Value(c.streamType.name),
-    )).toList());
-
-    _resolveChannelLogos(channels).catchError((_) {});
+    await _saveProviderWithChannels(
+      providerEntry: db.ProvidersCompanion.insert(
+        id: id,
+        name: name,
+        type: 'm3u',
+        url: Value(url),
+      ),
+      providerId: id,
+      channels: channels,
+      onProgress: onProgress,
+    );
     return channels.length;
   }
 
@@ -137,31 +126,68 @@ class ProviderManager {
       throw const XtreamException('No channels or streams found on this IPTV account.');
     }
 
-    onProgress?.call(4, 'Saving playlist to database...');
-    await _db.upsertProvider(db.ProvidersCompanion.insert(
-      id: id,
-      name: name,
-      type: 'xtream',
-      url: Value(url),
-      username: Value(username),
-      password: Value(password),
-    ));
-
-    await _db.upsertChannels(channels.map((c) => db.ChannelsCompanion.insert(
-      id: c.id,
-      providerId: c.providerId,
-      name: c.name,
-      tvgId: Value(c.tvgId),
-      tvgName: Value(c.tvgName),
-      tvgLogo: Value(c.tvgLogo),
-      groupTitle: Value(c.groupTitle),
-      channelNumber: Value(c.channelNumber),
-      streamUrl: c.streamUrl,
-      streamType: Value(c.streamType.name),
-    )).toList());
-
-    _resolveChannelLogos(channels).catchError((_) {});
+    await _saveProviderWithChannels(
+      providerEntry: db.ProvidersCompanion.insert(
+        id: id,
+        name: name,
+        type: 'xtream',
+        url: Value(url),
+        username: Value(username),
+        password: Value(password),
+      ),
+      providerId: id,
+      channels: channels,
+      onProgress: onProgress,
+    );
     return channels.length;
+  }
+
+  /// Persists a newly verified provider and its channels cleanly.
+  /// Rolls back the provider row if saving channels fails so empty 0/0/0 playlists never remain.
+  Future<void> _saveProviderWithChannels({
+    required db.ProvidersCompanion providerEntry,
+    required String providerId,
+    required List<Channel> channels,
+    void Function(int step, String message)? onProgress,
+  }) async {
+    onProgress?.call(4, 'Saving ${channels.length} items...');
+    await _db.upsertProvider(providerEntry);
+    try {
+      final companions = List<db.ChannelsCompanion>.generate(channels.length, (i) {
+        final c = channels[i];
+        return db.ChannelsCompanion.insert(
+          id: c.id,
+          providerId: c.providerId,
+          name: c.name,
+          tvgId: Value(c.tvgId),
+          tvgName: Value(c.tvgName),
+          tvgLogo: Value(c.tvgLogo),
+          groupTitle: Value(c.groupTitle),
+          channelNumber: Value(c.channelNumber),
+          streamUrl: c.streamUrl,
+          streamType: Value(c.streamType.name),
+          sortOrder: Value(i),
+        );
+      });
+
+      await _db.upsertChannels(
+        companions,
+        onProgress: (saved, total) {
+          onProgress?.call(4, 'Saving $saved / $total...');
+        },
+      );
+    } catch (e) {
+      // Roll back the orphaned provider row so UI never shows 0 Live / 0 Movies / 0 Series
+      try {
+        await _db.deleteProvider(providerId);
+      } catch (_) {}
+      rethrow;
+    }
+
+    final liveOnly = channels.where((c) => c.streamType == StreamType.live).toList();
+    if (liveOnly.isNotEmpty) {
+      _resolveChannelLogos(liveOnly).catchError((_) {});
+    }
   }
 
   /// Refresh a provider's channels from its source.
@@ -183,21 +209,29 @@ class ProviderManager {
     }
 
     // Save channels to database
-    await _db.upsertChannels(channels.map((c) => db.ChannelsCompanion.insert(
-      id: c.id,
-      providerId: c.providerId,
-      name: c.name,
-      tvgId: Value(c.tvgId),
-      tvgName: Value(c.tvgName),
-      tvgLogo: Value(c.tvgLogo),
-      groupTitle: Value(c.groupTitle),
-      channelNumber: Value(c.channelNumber),
-      streamUrl: c.streamUrl,
-      streamType: Value(c.streamType.name),
-    )).toList());
+    final companions = List<db.ChannelsCompanion>.generate(channels.length, (i) {
+      final c = channels[i];
+      return db.ChannelsCompanion.insert(
+        id: c.id,
+        providerId: c.providerId,
+        name: c.name,
+        tvgId: Value(c.tvgId),
+        tvgName: Value(c.tvgName),
+        tvgLogo: Value(c.tvgLogo),
+        groupTitle: Value(c.groupTitle),
+        channelNumber: Value(c.channelNumber),
+        streamUrl: c.streamUrl,
+        streamType: Value(c.streamType.name),
+        sortOrder: Value(i),
+      );
+    });
+    await _db.upsertChannels(companions);
 
-    // Resolve missing logos in background
-    _resolveChannelLogos(channels).catchError((_) {});
+    // Resolve missing logos in background (live channels only)
+    final liveOnly = channels.where((c) => c.streamType == StreamType.live).toList();
+    if (liveOnly.isNotEmpty) {
+      _resolveChannelLogos(liveOnly).catchError((_) {});
+    }
 
     return channels.length;
   }
@@ -306,57 +340,67 @@ class ProviderManager {
       final auth = await client.authenticate();
       debugPrint('[Xtream] Authentication verified: status=${auth.status}, user=${provider.username}');
 
-      // 2. Fetch category mappings
+      // 2. Fetch category mappings in parallel
       onProgress?.call(2, 'Loading categories...');
-      Map<String, String> liveCatMap = {};
+      final catResults = await Future.wait([
+        client.getLiveCategories().catchError((Object e) {
+          debugPrint('[Xtream] Could not fetch live categories: $e');
+          return <XtreamCategory>[];
+        }),
+        client.getVodCategories().catchError((Object e) {
+          debugPrint('[Xtream] Could not fetch VOD categories: $e');
+          return <XtreamCategory>[];
+        }),
+        client.getSeriesCategories().catchError((Object e) {
+          debugPrint('[Xtream] Could not fetch series categories: $e');
+          return <XtreamCategory>[];
+        }),
+      ]);
+      final liveCatMap = {for (final c in catResults[0]) c.id: c.name};
+      final vodCatMap = {for (final c in catResults[1]) c.id: c.name};
+      final seriesCatMap = {for (final c in catResults[2]) c.id: c.name};
+
+      // 3. Fetch streams sequentially with visible progress updates (avoids TV browser memory spike)
+      onProgress?.call(3, 'Downloading Live TV...');
+      List<Channel> lives = [];
+      Object? liveErr;
       try {
-        final liveCats = await client.getLiveCategories();
-        liveCatMap = {for (final c in liveCats) c.id: c.name};
+        lives = await client.getLiveStreams(
+          providerId: provider.id,
+          categoryMap: liveCatMap,
+        );
       } catch (e) {
-        debugPrint('[Xtream] Could not fetch live categories: $e');
+        liveErr = e;
+        debugPrint('[Xtream] Failed to fetch live streams: $e');
       }
 
-      Map<String, String> vodCatMap = {};
-      try {
-        final vodCats = await client.getVodCategories();
-        vodCatMap = {for (final c in vodCats) c.id: c.name};
-      } catch (e) {
-        debugPrint('[Xtream] Could not fetch VOD categories: $e');
-      }
-
-      Map<String, String> seriesCatMap = {};
-      try {
-        final seriesCats = await client.getSeriesCategories();
-        seriesCatMap = {for (final c in seriesCats) c.id: c.name};
-      } catch (e) {
-        debugPrint('[Xtream] Could not fetch series categories: $e');
-      }
-
-      // 3. Fetch streams with resolved categories
-      onProgress?.call(3, 'Loading catalog & streams...');
-      final lives = await client.getLiveStreams(
-        providerId: provider.id,
-        categoryMap: liveCatMap,
-      );
-
+      onProgress?.call(3, 'Downloading Movies (${lives.length} Live)...');
       List<Channel> vods = [];
       try {
         vods = await client.getVodStreams(
           providerId: provider.id,
           categoryMap: vodCatMap,
         );
-      } catch (_) {}
+      } catch (e) {
+        debugPrint('[Xtream] Failed to fetch VOD streams: $e');
+      }
 
+      onProgress?.call(3, 'Downloading Series (${lives.length} Live, ${vods.length} Movies)...');
       List<Channel> series = [];
       try {
         series = await client.getSeriesStreams(
           providerId: provider.id,
           categoryMap: seriesCatMap,
         );
-      } catch (_) {}
+      } catch (e) {
+        debugPrint('[Xtream] Failed to fetch series streams: $e');
+      }
 
       final total = [...lives, ...vods, ...series];
       if (total.isEmpty) {
+        if (liveErr != null) {
+          throw XtreamServerException('Failed to download streams: $liveErr');
+        }
         throw const XtreamException('Authentication succeeded, but no streams or channels were found on this account.');
       }
 
@@ -445,21 +489,20 @@ class ProviderManager {
     final lastCount = prefs.getInt(_logoChannelCountKey) ?? 0;
     final age = DateTime.now().millisecondsSinceEpoch - lastResolved;
 
-    final allChannels = await _db.getAllChannels();
+    final missingLive = await _db.getLiveChannelsMissingLogos();
 
-    // Skip if resolved recently AND no new channels were added
-    if (age < _logoCooldown.inMilliseconds && allChannels.length == lastCount) {
+    // Skip if resolved recently AND count hasn't changed
+    if (age < _logoCooldown.inMilliseconds && missingLive.length == lastCount) {
       return;
     }
 
-    final needsLogo = allChannels
-        .where((c) => c.tvgLogo == null || c.tvgLogo!.isEmpty)
+    final needsLogo = missingLive
         .map((c) => (id: c.id, name: c.name, tvgLogo: c.tvgLogo))
         .toList();
 
     if (needsLogo.isEmpty) {
       await prefs.setInt(_logoResolvedKey, DateTime.now().millisecondsSinceEpoch);
-      await prefs.setInt(_logoChannelCountKey, allChannels.length);
+      await prefs.setInt(_logoChannelCountKey, 0);
       return;
     }
 
@@ -496,7 +539,7 @@ class ProviderManager {
 
     debugPrint('[Logo] Resolution complete');
     await prefs.setInt(_logoResolvedKey, DateTime.now().millisecondsSinceEpoch);
-    await prefs.setInt(_logoChannelCountKey, allChannels.length);
+    await prefs.setInt(_logoChannelCountKey, missingLive.length);
   }
 
   /// Build EPG icon lookup map (display name / channel ID → icon URL).

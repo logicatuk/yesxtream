@@ -1,5 +1,6 @@
 import 'package:drift/drift.dart';
 import 'package:drift_flutter/drift_flutter.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:uuid/uuid.dart';
 
 import 'tables.dart';
@@ -38,13 +39,13 @@ class AppDatabase extends _$AppDatabase {
         },
         beforeOpen: (details) async {
           await customStatement('PRAGMA foreign_keys = ON;');
-          await customStatement('PRAGMA journal_mode = WAL;');
+          if (!kIsWeb) {
+            await customStatement('PRAGMA journal_mode = WAL;');
+          }
           await customStatement('PRAGMA synchronous = NORMAL;');
-          await customStatement('CREATE INDEX IF NOT EXISTS idx_channels_provider_stream ON channels(provider_id, stream_type);');
-          await customStatement('CREATE INDEX IF NOT EXISTS idx_channels_group ON channels(provider_id, group_title);');
-          await customStatement('CREATE INDEX IF NOT EXISTS idx_channels_prov_strm_sort ON channels(provider_id, stream_type, sort_order);');
-          await customStatement('CREATE INDEX IF NOT EXISTS idx_channels_strm_sort ON channels(stream_type, sort_order);');
-          await customStatement('CREATE INDEX IF NOT EXISTS idx_channels_prov_strm_grp_sort ON channels(provider_id, stream_type, group_title, sort_order);');
+          await customStatement('PRAGMA temp_store = MEMORY;');
+          await customStatement('PRAGMA cache_size = -16000;');
+          await _createChannelIndexes();
           await customStatement('CREATE INDEX IF NOT EXISTS idx_epg_prog_range ON epg_programmes(epg_channel_id, start, stop);');
           // Purge any orphaned channels from deleted providers
           await customStatement('DELETE FROM channels WHERE provider_id NOT IN (SELECT id FROM providers);');
@@ -177,6 +178,52 @@ class AppDatabase extends _$AppDatabase {
     }
     return result;
   }
+
+  Future<void> _createChannelIndexes() async {
+    await customStatement('CREATE INDEX IF NOT EXISTS idx_channels_provider_stream ON channels(provider_id, stream_type);');
+    await customStatement('CREATE INDEX IF NOT EXISTS idx_channels_group ON channels(provider_id, group_title);');
+    await customStatement('CREATE INDEX IF NOT EXISTS idx_channels_prov_strm_sort ON channels(provider_id, stream_type, sort_order);');
+    await customStatement('CREATE INDEX IF NOT EXISTS idx_channels_strm_sort ON channels(stream_type, sort_order);');
+    await customStatement('CREATE INDEX IF NOT EXISTS idx_channels_prov_strm_grp_sort ON channels(provider_id, stream_type, group_title, sort_order);');
+  }
+
+  Future<void> _dropChannelIndexes() async {
+    await customStatement('DROP INDEX IF EXISTS idx_channels_provider_stream;');
+    await customStatement('DROP INDEX IF EXISTS idx_channels_group;');
+    await customStatement('DROP INDEX IF EXISTS idx_channels_prov_strm_sort;');
+    await customStatement('DROP INDEX IF EXISTS idx_channels_strm_sort;');
+    await customStatement('DROP INDEX IF EXISTS idx_channels_prov_strm_grp_sort;');
+  }
+
+  /// Fast aggregate counts per stream_type (`live`, `vod`, `series`) for a provider.
+  Future<Map<String, int>> getChannelCountsByType(String providerId) async {
+    final rows = await customSelect(
+      'SELECT stream_type, COUNT(*) as cnt FROM channels WHERE provider_id = ? GROUP BY stream_type',
+      variables: [Variable.withString(providerId)],
+    ).get();
+    final counts = <String, int>{};
+    for (final row in rows) {
+      counts[row.read<String>('stream_type')] = row.read<int>('cnt');
+    }
+    return counts;
+  }
+
+  /// Fast O(1) existence check for a provider's stream type without fetching rows.
+  Future<bool> hasStreamType(String providerId, String streamType) async {
+    final rows = await customSelect(
+      'SELECT 1 FROM channels WHERE provider_id = ? AND stream_type = ? LIMIT 1',
+      variables: [Variable.withString(providerId), Variable.withString(streamType)],
+    ).get();
+    return rows.isNotEmpty;
+  }
+
+  /// Fetch only live channels missing a logo (skips tens of thousands of VOD/Series).
+  Future<List<Channel>> getLiveChannelsMissingLogos() =>
+      (select(channels)
+            ..where((t) =>
+                t.streamType.equals('live') &
+                (t.tvgLogo.isNull() | t.tvgLogo.equals(''))))
+          .get();
 
   /// Get distinct VOD movie groups and counts for a provider.
   Future<Map<String, int>> getVodGroupCounts({String? providerId}) async {
@@ -334,10 +381,85 @@ class AppDatabase extends _$AppDatabase {
   Future<List<Channel>> getFavoriteChannels() =>
       (select(channels)..where((t) => t.favorite.equals(true))).get();
 
-  Future<void> upsertChannels(List<ChannelsCompanion> entries) async {
-    await batch((b) {
-      b.insertAllOnConflictUpdate(channels, entries);
-    });
+  Future<void> upsertChannels(
+    List<ChannelsCompanion> entries, {
+    void Function(int inserted, int total)? onProgress,
+  }) async {
+    if (entries.isEmpty) return;
+
+    // Small batches use Drift directly
+    if (entries.length <= 300) {
+      await batch((b) {
+        b.insertAllOnConflictUpdate(channels, entries);
+      });
+      onProgress?.call(entries.length, entries.length);
+      return;
+    }
+
+    // Large catalogs (e.g. 50k+ Xtream channels/VOD/Series):
+    // 1. Drop secondary B-tree indexes during bulk insert so SQLite builds them once at the end.
+    // 2. Pack 75 rows per multi-row INSERT statement (825 bound params < 999 SQLite limit).
+    // 3. Commit in 600-row chunks and yield to keep Web/TV UI responsive and IndexedDB happy.
+    const rowsPerStmt = 75;
+    const rowsPerChunk = 600;
+    final dropIndexes = entries.length > 1500;
+    final placeholderRow = '(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
+    const upsertSuffix =
+        ' ON CONFLICT(id) DO UPDATE SET '
+        'provider_id = excluded.provider_id, '
+        'name = excluded.name, '
+        'tvg_id = excluded.tvg_id, '
+        'tvg_name = excluded.tvg_name, '
+        'tvg_logo = excluded.tvg_logo, '
+        'group_title = excluded.group_title, '
+        'channel_number = excluded.channel_number, '
+        'stream_url = excluded.stream_url, '
+        'stream_type = excluded.stream_type, '
+        'sort_order = excluded.sort_order';
+
+    if (dropIndexes) {
+      await customStatement('PRAGMA synchronous = OFF;');
+      await _dropChannelIndexes();
+    }
+
+    try {
+      final total = entries.length;
+      for (var chunkStart = 0; chunkStart < total; chunkStart += rowsPerChunk) {
+        final chunkEnd = (chunkStart + rowsPerChunk).clamp(0, total);
+        await transaction(() async {
+          for (var i = chunkStart; i < chunkEnd; i += rowsPerStmt) {
+            final stmtEnd = (i + rowsPerStmt).clamp(i, chunkEnd);
+            final rowCount = stmtEnd - i;
+            final placeholders = List.filled(rowCount, placeholderRow).join(', ');
+            final sql =
+                'INSERT INTO channels (id, provider_id, name, tvg_id, tvg_name, tvg_logo, group_title, channel_number, stream_url, stream_type, sort_order) VALUES $placeholders$upsertSuffix';
+            final args = <Object?>[];
+            for (var j = i; j < stmtEnd; j++) {
+              final e = entries[j];
+              args.add(e.id.value);
+              args.add(e.providerId.value);
+              args.add(e.name.value);
+              args.add(e.tvgId.present ? e.tvgId.value : null);
+              args.add(e.tvgName.present ? e.tvgName.value : null);
+              args.add(e.tvgLogo.present ? e.tvgLogo.value : null);
+              args.add(e.groupTitle.present ? e.groupTitle.value : null);
+              args.add(e.channelNumber.present ? e.channelNumber.value : null);
+              args.add(e.streamUrl.value);
+              args.add(e.streamType.present ? e.streamType.value : 'live');
+              args.add(e.sortOrder.present ? e.sortOrder.value : 0);
+            }
+            await customStatement(sql, args);
+          }
+        });
+        onProgress?.call(chunkEnd, total);
+        await Future<void>.delayed(Duration.zero);
+      }
+    } finally {
+      if (dropIndexes) {
+        await _createChannelIndexes();
+        await customStatement('PRAGMA synchronous = NORMAL;');
+      }
+    }
   }
 
   Future<void> updateChannelLogo(String channelId, String logoUrl) =>

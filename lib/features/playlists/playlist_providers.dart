@@ -69,11 +69,7 @@ final activePlaylistHasMoviesProvider = FutureProvider<bool>((ref) async {
   final playlist = ref.watch(activePlaylistProvider);
   if (playlist == null) return false;
   final dbInstance = ref.watch(databaseProvider);
-  final count = await (dbInstance.select(dbInstance.channels)
-        ..where((t) =>
-            t.providerId.equals(playlist.id) & t.streamType.equals('vod')))
-      .get();
-  return count.isNotEmpty;
+  return dbInstance.hasStreamType(playlist.id, 'vod');
 });
 
 /// Checks if active playlist has Series
@@ -81,11 +77,7 @@ final activePlaylistHasSeriesProvider = FutureProvider<bool>((ref) async {
   final playlist = ref.watch(activePlaylistProvider);
   if (playlist == null) return false;
   final dbInstance = ref.watch(databaseProvider);
-  final count = await (dbInstance.select(dbInstance.channels)
-        ..where((t) =>
-            t.providerId.equals(playlist.id) & t.streamType.equals('series')))
-      .get();
-  return count.isNotEmpty;
+  return dbInstance.hasStreamType(playlist.id, 'series');
 });
 
 /// Channel counts for active playlist (live, vod, series)
@@ -107,28 +99,12 @@ final activePlaylistStatsProvider = FutureProvider<PlaylistStats>((ref) async {
   final playlist = ref.watch(activePlaylistProvider);
   if (playlist == null) return const PlaylistStats();
   final dbInstance = ref.watch(databaseProvider);
-  final all = await (dbInstance.select(dbInstance.channels)
-        ..where((t) => t.providerId.equals(playlist.id)))
-      .get();
-
-  int live = 0;
-  int vod = 0;
-  int series = 0;
-
-  for (final c in all) {
-    if (c.streamType == 'vod') {
-      vod++;
-    } else if (c.streamType == 'series') {
-      series++;
-    } else {
-      live++;
-    }
-  }
+  final counts = await dbInstance.getChannelCountsByType(playlist.id);
 
   return PlaylistStats(
-    liveCount: live,
-    moviesCount: vod,
-    seriesCount: series,
+    liveCount: counts['live'] ?? 0,
+    moviesCount: counts['vod'] ?? 0,
+    seriesCount: counts['series'] ?? 0,
   );
 });
 
@@ -187,7 +163,9 @@ final activePlaylistAccountInfoProvider =
       username: playlist.username!,
       password: playlist.password!,
     );
-    final serverInfo = await client.authenticate();
+    final serverInfo = await client.authenticate().timeout(
+      const Duration(seconds: 6),
+    );
     client.dispose();
 
     if (serverInfo.expDate != null) {
