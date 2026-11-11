@@ -97,5 +97,5 @@ flutter_launcher_icons:
     generate: true
     image_path: "assets/icon/yestream.png"
   image_path: "assets/icon/yestream.png"
-  adaptive_icon_background: "#0F0E1A"
-  adaptive_icon_foreground: "assets/icon/yestream.png"
+  adaptive_icon_background: "#100F29"
+  adaptive_icon_foreground: "assets/icon/yestream_foreground.png"

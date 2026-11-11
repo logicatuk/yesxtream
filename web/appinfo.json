@@ -7,7 +7,7 @@
   "title": "YesXtream",
   "icon": "icon.png",
   "largeIcon": "largeIcon.png",
-  "iconColor": "#6C5CE7",
+  "iconColor": "#100f29",
   "resolution": "1920x1080",
   "handlesRelaunch": true,
   "disableBackHistoryAPI": true,

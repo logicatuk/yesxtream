@@ -1558,7 +1558,8 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Image.asset('assets/icon/yestream.png', width: 80, height: 80,
+              Image.asset('assets/icon/yestream_logo.png', width: 80, height: 80,
+                fit: BoxFit.contain,
                 errorBuilder: (_, __, ___) => const Icon(Icons.tv, size: 64, color: Color(0xFF6C5CE7))),
               const SizedBox(height: 12),
               const Text('YesXtream', style: TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold)),

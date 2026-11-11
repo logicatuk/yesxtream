@@ -1250,10 +1250,10 @@ class _BrandLogo extends StatelessWidget {
         ClipRRect(
           borderRadius: BorderRadius.circular(8),
           child: Image.asset(
-            'assets/icon/yestream.png',
+            'assets/icon/yestream_logo.png',
             width: 34,
             height: 34,
-            fit: BoxFit.cover,
+            fit: BoxFit.contain,
           ),
         ),
         const SizedBox(width: 10),

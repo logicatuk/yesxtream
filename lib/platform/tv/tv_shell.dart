@@ -64,9 +64,10 @@ class _TvShellState extends State<TvShell> {
                           ),
                         )
                       : Image.asset(
-                          'assets/icon/yestream.png',
+                          'assets/icon/yestream_logo.png',
                           width: 28,
                           height: 28,
+                          fit: BoxFit.contain,
                           errorBuilder: (_, __, ___) => const Icon(
                             Icons.play_circle_fill_rounded,
                             color: Color(0xFF8B5CF6),

@@ -96,10 +96,10 @@ class _YesShellState extends ConsumerState<YesShell> {
                       ClipRRect(
                         borderRadius: BorderRadius.circular(8),
                         child: Image.asset(
-                          'assets/icon/yestream.png',
+                          'assets/icon/yestream_logo.png',
                           width: logoSize,
                           height: logoSize,
-                          fit: BoxFit.cover,
+                          fit: BoxFit.contain,
                         ),
                       ),
                       if (!isVeryCompact) ...[

@@ -198,9 +198,10 @@ class _SplashScreenState extends State<SplashScreen>
                               child: Transform.scale(
                                 scale: _iconScale.value,
                                 child: Image.asset(
-                                  'assets/icon/yestream.png',
+                                  'assets/icon/yestream_logo.png',
                                   width: 160,
                                   height: 160,
+                                  fit: BoxFit.contain,
                                 ),
                               ),
                             ),
