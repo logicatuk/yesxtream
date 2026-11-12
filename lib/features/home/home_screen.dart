@@ -1841,12 +1841,12 @@ class _TvActionButtonState extends State<_TvActionButton> {
             duration: animDur,
             width: double.infinity,
             height: double.infinity,
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
             decoration: BoxDecoration(
               color: _highlight
                   ? const Color(0xFF6C5CE7).withValues(alpha: 0.35)
                   : const Color(0xFF141328).withValues(alpha: 0.7),
-              borderRadius: BorderRadius.circular(10),
+              borderRadius: BorderRadius.circular(14),
               border: Border.all(
                 color: _highlight
                     ? Colors.white
@@ -1873,28 +1873,28 @@ class _TvActionButtonState extends State<_TvActionButton> {
                   children: [
                     if (widget.isLoading)
                       const SizedBox(
-                        width: 16,
-                        height: 16,
+                        width: 22,
+                        height: 22,
                         child: CircularProgressIndicator(
                           color: Colors.white,
-                          strokeWidth: 2.0,
+                          strokeWidth: 2.4,
                         ),
                       )
                     else
                       Icon(
                         widget.icon,
-                        size: 17,
+                        size: 24,
                         color: Colors.white,
                       ),
-                    const SizedBox(width: 5),
+                    const SizedBox(width: 10),
                     Text(
                       widget.title,
                       maxLines: 1,
                       style: TextStyle(
                         color: Colors.white,
-                        fontSize: 12,
+                        fontSize: 16,
                         fontWeight:
-                            widget.isExit ? FontWeight.w800 : FontWeight.w600,
+                            widget.isExit ? FontWeight.w800 : FontWeight.w700,
                         letterSpacing: widget.isExit ? 0.4 : 0.2,
                       ),
                     ),
