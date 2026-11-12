@@ -134,7 +134,7 @@
           // Channel / Volume
           'ChannelUp', 'ChannelDown', 'VolumeUp', 'VolumeDown', 'VolumeMute',
           // Navigation extras
-          'Info', 'Guide', 'PreviousChannel',
+          'Info', 'Guide', 'ChannelList', 'PreviousChannel', 'Tools', 'Menu',
           // Color buttons (Red/Green/Yellow/Blue)
           'ColorF0Red', 'ColorF1Green', 'ColorF2Yellow', 'ColorF3Blue',
           // Exit
@@ -149,17 +149,16 @@
     window.addEventListener('load', registerTizenKeys);
 
     // ── Full Key Code Interceptor (attached BEFORE Flutter loads) ───────────
-    // Maps platform-specific TV remote key codes to standard keys that
-    // Flutter's keyboard handling understands.
+    // Maps platform-specific LG webOS / Samsung Tizen TV remote key codes to
+    // standard Web KeyboardEvents that Flutter's keyboard handling understands.
     (function() {
       var TV_KEY_MAP = {
         // ── Back / Return → Escape ──────────────────────────────────────────
         461:   { key: 'Escape', code: 'Escape', keyCode: 27 },   // LG Back
         10009: { key: 'Escape', code: 'Escape', keyCode: 27 },   // Tizen Return
 
-        // ── Exit ───────────────────────────────────────────────────────────
-        1003:  null,  // LG Exit — handled specially
-        10182: null,  // Tizen Exit — handled specially
+        // ── HDMI-CEC / Anynet+ Center → Enter ──────────────────────────────
+        23:    { key: 'Enter',  code: 'Enter',  keyCode: 13 },
 
         // ── Media Transport ────────────────────────────────────────────────
         415:   { key: 'MediaPlay',        code: 'MediaPlay',        keyCode: 415 },
@@ -175,6 +174,11 @@
         427:   { key: 'PageUp',   code: 'PageUp',   keyCode: 33 },
         428:   { key: 'PageDown', code: 'PageDown', keyCode: 34 },
 
+        // ── Samsung / LG Info, Guide & Channel List ───────────────────────
+        457:   { key: 'i', code: 'KeyI', keyCode: 73 }, // Info
+        458:   { key: 'g', code: 'KeyG', keyCode: 71 }, // Guide
+        10073: { key: 'g', code: 'KeyG', keyCode: 71 }, // Tizen ChannelList
+
         // ── Color Buttons ─────────────────────────────────────────────────
         403:   { key: 'ColorF0Red',    code: 'ColorF0Red',    keyCode: 403 },
         404:   { key: 'ColorF1Green',  code: 'ColorF1Green',  keyCode: 404 },
@@ -184,45 +188,78 @@
 
       var dispatchingMapped = false;
 
-      window.addEventListener('keydown', function(e) {
+      function resolveKeyTarget() {
+        var active = document.activeElement;
+        if (!active || active === document.body || active.tagName === 'VIDEO') {
+          var fv = document.querySelector('flutter-view') || document.querySelector('flt-glass-pane');
+          if (fv && typeof fv.focus === 'function') {
+            try { fv.focus({ preventScroll: true }); } catch (_) {}
+          }
+          return fv || document.body || window;
+        }
+        return active;
+      }
+
+      function dispatchMappedKey(type, mapped) {
+        var target = resolveKeyTarget();
+        dispatchingMapped = true;
+        try {
+          var ev = new KeyboardEvent(type, {
+            key: mapped.key,
+            code: mapped.code,
+            bubbles: true,
+            cancelable: true,
+            composed: true,
+          });
+          try {
+            Object.defineProperty(ev, 'keyCode', { get: function() { return mapped.keyCode; } });
+            Object.defineProperty(ev, 'which', { get: function() { return mapped.keyCode; } });
+          } catch (_) {}
+          target.dispatchEvent(ev);
+        } finally {
+          dispatchingMapped = false;
+        }
+      }
+
+      function handleKeyEvent(e, type) {
         if (dispatchingMapped) return;
 
-        // Exit keys
+        // Exit keys (LG 1003, Tizen 10182)
         if (e.keyCode === 1003 || e.keyCode === 10182) {
           e.preventDefault();
           e.stopImmediatePropagation();
-          window.yesxtreamExitApp();
+          if (type === 'keydown') window.yesxtreamExitApp();
+          return;
+        }
+
+        // Some Samsung Tizen browsers send Enter (13) with empty/Unidentified key
+        if (e.keyCode === 13 && (!e.key || e.key === 'Unidentified')) {
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          dispatchMappedKey(type, { key: 'Enter', code: 'Enter', keyCode: 13 });
           return;
         }
 
         var mapped = TV_KEY_MAP[e.keyCode];
-        if (!mapped) return;  // Not a known TV key — pass through normally
+        if (!mapped) {
+          if (type === 'keydown') resolveKeyTarget();
+          return;
+        }
 
         e.preventDefault();
         e.stopImmediatePropagation();
+        dispatchMappedKey(type, mapped);
+      }
 
-        var target = (document.activeElement && document.activeElement !== document.body)
-          ? document.activeElement
-          : (document.querySelector('flutter-view') || document.body || window);
+      window.addEventListener('keydown', function(e) { handleKeyEvent(e, 'keydown'); }, true);
+      window.addEventListener('keyup', function(e) { handleKeyEvent(e, 'keyup'); }, true);
 
-        dispatchingMapped = true;
-        try {
-          ['keydown', 'keyup'].forEach(function(type) {
-            var ev = new KeyboardEvent(type, {
-              key: mapped.key,
-              code: mapped.code,
-              bubbles: true,
-              cancelable: true,
-              composed: true,
-            });
-            try {
-              Object.defineProperty(ev, 'keyCode', { get: function() { return mapped.keyCode; } });
-              Object.defineProperty(ev, 'which', { get: function() { return mapped.keyCode; } });
-            } catch (_) {}
-            target.dispatchEvent(ev);
-          });
-        } finally {
-          dispatchingMapped = false;
+      // Legacy / hardware Tizen Return key event fallback
+      window.addEventListener('tizenhwkey', function(e) {
+        if (e && e.keyName === 'back') {
+          var esc = { key: 'Escape', code: 'Escape', keyCode: 27 };
+          dispatchMappedKey('keydown', esc);
+          dispatchMappedKey('keyup', esc);
         }
       }, true);
     })();

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../../core/tv_back_handler.dart';
 import '../../data/datasources/local/database.dart' as db;
 import '../../data/datasources/remote/tmdb_client.dart';
 import '../../data/datasources/remote/xtream_client.dart';
@@ -337,7 +338,9 @@ class _MovieDetailScreenState extends ConsumerState<MovieDetailScreen> {
     final trailerKey = _xtreamInfo?['youtube_trailer'] as String? ?? _tmdbDetail?.trailerKey;
     final settings = ref.watch(appSettingsProvider);
 
-    return Scaffold(
+    return TvBackHandler(
+      fallbackRoute: '/movies',
+      child: Scaffold(
       backgroundColor: const Color(0xFF0A0A0F),
       body: Stack(
         children: [
@@ -758,6 +761,7 @@ class _MovieDetailScreenState extends ConsumerState<MovieDetailScreen> {
           ),
         ],
       ),
+    ),
     );
   }
 }

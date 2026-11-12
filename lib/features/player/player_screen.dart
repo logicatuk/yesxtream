@@ -533,6 +533,18 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
       return KeyEventResult.handled;
     }
 
+    if (key == LogicalKeyboardKey.info || key == LogicalKeyboardKey.keyI) {
+      _toggleOverlay();
+      return KeyEventResult.handled;
+    }
+
+    if (key == LogicalKeyboardKey.guide || key == LogicalKeyboardKey.keyG) {
+      if (widget.channels.isNotEmpty) {
+        setState(() => _showChannelList = !_showChannelList);
+        return KeyEventResult.handled;
+      }
+    }
+
     return KeyEventResult.ignored;
   }
 

@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/platform_info.dart';
+import '../../core/tv_back_handler.dart';
 import '../../data/services/app_settings.dart';
 import '../player/player_service.dart';
 import '../playlists/playlist_providers.dart';
@@ -36,16 +37,18 @@ class _YesShellState extends ConsumerState<YesShell> {
       return widget.child;
     }
 
-    return Scaffold(
-      backgroundColor: const Color(0xFF0A0A0F),
-      body: Column(
-        children: [
-          // ── Top Bar with Logo, 4 Tabs, and Right Clock Timer ──
-          _buildTopBar(context, location, settings),
+    return TvBackHandler(
+      child: Scaffold(
+        backgroundColor: const Color(0xFF0A0A0F),
+        body: Column(
+          children: [
+            // ── Top Bar with Logo, 4 Tabs, and Right Clock Timer ──
+            _buildTopBar(context, location, settings),
 
-          // ── Full-Width Page Content (No left navigation rail) ──
-          Expanded(child: widget.child),
-        ],
+            // ── Full-Width Page Content (No left navigation rail) ──
+            Expanded(child: widget.child),
+          ],
+        ),
       ),
     );
   }

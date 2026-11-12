@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
 import 'package:yesxtream/app/app.dart';
 import 'package:yesxtream/core/platform_info.dart';
+import 'package:yesxtream/core/tv_back_handler.dart';
 import 'package:yesxtream/data/datasources/local/database.dart' as db;
 import 'package:yesxtream/features/home/home_screen.dart';
 import 'package:yesxtream/features/playlists/playlist_providers.dart';
@@ -82,4 +84,31 @@ void main() {
     },
     variant: TargetPlatformVariant.only(TargetPlatform.android),
   );
+
+  testWidgets('TvBackHandler navigates to fallbackRoute on Escape (Samsung Tizen Return)',
+      (WidgetTester tester) async {
+    final testRouter = GoRouter(
+      initialLocation: '/settings',
+      routes: [
+        GoRoute(
+          path: '/home',
+          builder: (_, __) => const Scaffold(body: Text('Home Page')),
+        ),
+        GoRoute(
+          path: '/settings',
+          builder: (_, __) => const TvBackHandler(
+            child: Scaffold(body: Text('Settings Page')),
+          ),
+        ),
+      ],
+    );
+
+    await tester.pumpWidget(MaterialApp.router(routerConfig: testRouter));
+    await tester.pumpAndSettle();
+    expect(find.text('Settings Page'), findsOneWidget);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    expect(find.text('Home Page'), findsOneWidget);
+  });
 }
