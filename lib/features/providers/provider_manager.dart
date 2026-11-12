@@ -35,8 +35,11 @@ class ProviderManager {
   ProviderManager(this._db);
 
   /// Check provider count against tier limit.
-  Future<void> _checkProviderLimit() async {
+  Future<void> _checkProviderLimit([String? allowExistingId]) async {
     final existing = await _db.getAllProviders();
+    if (allowExistingId != null && existing.any((p) => p.id == allowExistingId)) {
+      return;
+    }
     if (existing.length >= FeatureGate.maxProviders) {
       throw ProviderLimitException(FeatureGate.maxProviders);
     }
@@ -49,7 +52,7 @@ class ProviderManager {
     required String url,
     void Function(int step, String message)? onProgress,
   }) async {
-    await _checkProviderLimit();
+    await _checkProviderLimit(id);
     // Auto-detect Xtream link disguised as M3U
     final xtreamCreds = parseXtreamFromM3uUrl(url);
     if (xtreamCreds != null) {
@@ -105,7 +108,7 @@ class ProviderManager {
     required String password,
     void Function(int step, String message)? onProgress,
   }) async {
-    await _checkProviderLimit();
+    await _checkProviderLimit(id);
 
     final tempProvider = db.Provider(
       id: id,

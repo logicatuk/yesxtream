@@ -99,5 +99,40 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Open'), findsOneWidget);
   });
+
+  testWidgets('showChoosePlaylistTypeDialog and showPlaylistFormDialog use unified UI',
+      (WidgetTester tester) async {
+    await tester.pumpWidget(
+      ProviderScope(
+        child: MaterialApp(
+          home: Builder(
+            builder: (context) => Scaffold(
+              body: Center(
+                child: ElevatedButton(
+                  onPressed: () => showAddProviderDialog(
+                    context,
+                    existingId: 'p1',
+                    initialName: 'My Server',
+                    initialUrl: 'http://myiptv.com',
+                    initialUsername: 'user1',
+                    initialPassword: 'pass1',
+                    isXtream: true,
+                  ),
+                  child: const Text('Edit Provider'),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('Edit Provider'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Edit Playlist'), findsWidgets);
+    expect(find.text('Save Changes'), findsOneWidget);
+    expect(find.text('user1'), findsOneWidget);
+  });
 }
 

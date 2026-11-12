@@ -8,11 +8,26 @@ import 'provider_manager.dart';
 
 /// Shows the responsive Add Provider experience.
 /// Uses a full-screen route (D-pad, keyboard, mouse, and touch friendly).
-Future<bool?> showAddProviderDialog(BuildContext context) {
+Future<bool?> showAddProviderDialog(
+  BuildContext context, {
+  String? existingId,
+  String? initialName,
+  String? initialUrl,
+  String? initialUsername,
+  String? initialPassword,
+  bool? isXtream,
+}) {
   return Navigator.of(context).push<bool>(
     MaterialPageRoute(
       fullscreenDialog: true,
-      builder: (_) => const _AddProviderPage(),
+      builder: (_) => _AddProviderPage(
+        existingId: existingId,
+        initialName: initialName,
+        initialUrl: initialUrl,
+        initialUsername: initialUsername,
+        initialPassword: initialPassword,
+        isXtream: isXtream,
+      ),
     ),
   );
 }
@@ -20,7 +35,21 @@ Future<bool?> showAddProviderDialog(BuildContext context) {
 enum _ProviderType { m3u, xtream }
 
 class _AddProviderPage extends ConsumerStatefulWidget {
-  const _AddProviderPage();
+  final String? existingId;
+  final String? initialName;
+  final String? initialUrl;
+  final String? initialUsername;
+  final String? initialPassword;
+  final bool? isXtream;
+
+  const _AddProviderPage({
+    this.existingId,
+    this.initialName,
+    this.initialUrl,
+    this.initialUsername,
+    this.initialPassword,
+    this.isXtream,
+  });
 
   @override
   ConsumerState<_AddProviderPage> createState() => _AddProviderPageState();
@@ -52,6 +81,30 @@ class _AddProviderPageState extends ConsumerState<_AddProviderPage> {
   bool _obscurePassword = true;
   bool _loading = false;
   String? _statusMessage;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.isXtream == true) {
+      _type = _ProviderType.xtream;
+    } else if (widget.isXtream == false) {
+      _type = _ProviderType.m3u;
+    }
+    if (widget.initialName != null) {
+      _m3uName.text = widget.initialName!;
+      _xtreamName.text = widget.initialName!;
+    }
+    if (widget.initialUrl != null) {
+      _m3uUrl.text = widget.initialUrl!;
+      _xtreamUrl.text = widget.initialUrl!;
+    }
+    if (widget.initialUsername != null) {
+      _xtreamUser.text = widget.initialUsername!;
+    }
+    if (widget.initialPassword != null) {
+      _xtreamPass.text = widget.initialPassword!;
+    }
+  }
 
   @override
   void dispose() {
@@ -103,23 +156,26 @@ class _AddProviderPageState extends ConsumerState<_AddProviderPage> {
       if (mounted) setState(() => _statusMessage = msg);
     }
 
+    final targetId = widget.existingId ??
+        (_type == _ProviderType.m3u
+            ? _generateId(_m3uName.text.trim())
+            : _generateId(_xtreamName.text.trim()));
+
     if (_type == _ProviderType.m3u) {
-      final newId = _generateId(_m3uName.text.trim());
-      await _addProvider(newId, () {
+      await _addProvider(targetId, () {
         final manager = ref.read(providerManagerProvider);
         return manager.addM3uProvider(
-          id: newId,
+          id: targetId,
           name: _m3uName.text.trim(),
           url: _m3uUrl.text.trim(),
           onProgress: onProgress,
         );
       });
     } else {
-      final newId = _generateId(_xtreamName.text.trim());
-      await _addProvider(newId, () {
+      await _addProvider(targetId, () {
         final manager = ref.read(providerManagerProvider);
         return manager.addXtreamProvider(
-          id: newId,
+          id: targetId,
           name: _xtreamName.text.trim(),
           url: _xtreamUrl.text.trim(),
           username: _xtreamUser.text.trim(),
@@ -147,7 +203,13 @@ class _AddProviderPageState extends ConsumerState<_AddProviderPage> {
       if (!mounted) return;
       Navigator.of(context).pop(true);
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Provider added successfully')),
+        SnackBar(
+          content: Text(
+            widget.existingId != null
+                ? 'Playlist updated successfully'
+                : 'Provider added successfully',
+          ),
+        ),
       );
     } on ProviderLimitException catch (e) {
       if (!mounted) return;
@@ -663,23 +725,25 @@ class _AddProviderPageState extends ConsumerState<_AddProviderPage> {
           ),
         ),
         const SizedBox(width: 14),
-        const Expanded(
+        Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'Add Provider',
-                style: TextStyle(
+                widget.existingId != null ? 'Edit Playlist' : 'Add Provider',
+                style: const TextStyle(
                   fontSize: 20,
                   fontWeight: FontWeight.w800,
                   color: Colors.white,
                   letterSpacing: -0.2,
                 ),
               ),
-              SizedBox(height: 2),
+              const SizedBox(height: 2),
               Text(
-                'Connect your IPTV playlist or server',
-                style: TextStyle(fontSize: 12.5, color: Colors.white60),
+                widget.existingId != null
+                    ? 'Update your connection details'
+                    : 'Connect your IPTV playlist or server',
+                style: const TextStyle(fontSize: 12.5, color: Colors.white60),
               ),
             ],
           ),
@@ -997,7 +1061,9 @@ class _AddProviderPageState extends ConsumerState<_AddProviderPage> {
               )
             : const Icon(Icons.add_circle_outline_rounded, size: 20),
         label: Text(
-          _loading ? (_statusMessage ?? 'Connecting...') : 'Add Provider',
+          _loading
+              ? (_statusMessage ?? 'Connecting...')
+              : (widget.existingId != null ? 'Save Changes' : 'Add Provider'),
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           style: const TextStyle(fontSize: 15.5, fontWeight: FontWeight.w700),

@@ -4,9 +4,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import '../../data/datasources/local/database.dart' as db;
+import '../providers/add_provider_dialog.dart';
 import '../providers/provider_manager.dart';
-import 'choose_playlist_type_dialog.dart';
-import 'playlist_form_dialog.dart';
 import 'playlist_providers.dart';
 
 class PlaylistManagerScreen extends ConsumerWidget {
@@ -26,7 +25,7 @@ class PlaylistManagerScreen extends ConsumerWidget {
         ),
         actions: [
           FilledButton.icon(
-            onPressed: () => showChoosePlaylistTypeDialog(context),
+            onPressed: () => showAddProviderDialog(context),
             style: FilledButton.styleFrom(
               backgroundColor: const Color(0xFF6C5CE7),
             ),
@@ -63,7 +62,7 @@ class PlaylistManagerScreen extends ConsumerWidget {
                   ),
                   const SizedBox(height: 20),
                   FilledButton.icon(
-                    onPressed: () => showChoosePlaylistTypeDialog(context),
+                    onPressed: () => showAddProviderDialog(context),
                     style: FilledButton.styleFrom(
                       backgroundColor: const Color(0xFF6C5CE7),
                     ),
@@ -315,16 +314,14 @@ class _ManagePlaylistDialogState extends ConsumerState<_ManagePlaylistDialog> {
 
   void _editConnection() {
     Navigator.of(context).pop();
-    showPlaylistFormDialog(
+    showAddProviderDialog(
       context,
-      type: widget.playlist.type == 'xtream'
-          ? PlaylistImportType.iptv
-          : PlaylistImportType.m3u,
       existingId: widget.playlist.id,
       initialName: widget.playlist.name,
       initialUrl: widget.playlist.url,
       initialUsername: widget.playlist.username,
       initialPassword: widget.playlist.password,
+      isXtream: widget.playlist.type == 'xtream',
     );
   }
 
