@@ -159,7 +159,7 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
   StreamSubscription<List<db.Channel>>? _channelsSub;
   Timer? _failoverTimer;
 
-  bool get _isTvNav => PlatformInfo.isTV || PlatformInfo.isAndroid;
+  bool get _isTvNav => PlatformInfo.isTV;
   db.Channel? _failoverSuggestion;
   bool _showFailoverBanner = false;
   static const _kFailoverEnabled = 'failover_enabled';

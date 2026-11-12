@@ -127,6 +127,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               final isSelected = group == _selectedGroup;
 
               return ListTile(
+                autofocus: isSelected,
+                focusColor: const Color(0xFF6C5CE7).withValues(alpha: 0.35),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                 tileColor: isSelected ? const Color(0xFF6C5CE7).withValues(alpha: 0.22) : Colors.transparent,
                 leading: Icon(

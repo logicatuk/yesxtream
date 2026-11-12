@@ -73,10 +73,10 @@ class _YesXtreamAppState extends ConsumerState<YesXtreamApp> {
       debugShowCheckedModeBanner: false,
       theme: YesXtreamTheme.dark,
       routerConfig: router,
-      // On Web (LG webOS / Samsung Tizen), _defaultWebShortcuts maps Enter to
-      // ButtonActivateIntent and Arrow keys to ScrollIntent, breaking TV remote
-      // OK/D-pad activation on FocusableActionDetector tiles and focus traversal.
-      shortcuts: kIsWeb
+      // On TV platforms (Fire TV, Android TV, LG webOS, Samsung Tizen), ensure
+      // Enter/Select/DPAD-Center activate tiles & buttons directly and Arrow
+      // keys always perform spatial directional focus instead of scrolling/touch.
+      shortcuts: (kIsWeb || PlatformInfo.isTV)
           ? <ShortcutActivator, Intent>{
               ...WidgetsApp.defaultShortcuts,
               const SingleActivator(LogicalKeyboardKey.enter):
@@ -100,6 +100,12 @@ class _YesXtreamAppState extends ConsumerState<YesXtreamApp> {
       builder: (context, child) {
         // Detect TV mode from the first MediaQuery context
         PlatformInfo.detectFromContext(context);
+        if (PlatformInfo.isTV &&
+            FocusManager.instance.highlightStrategy !=
+                FocusHighlightStrategy.alwaysTraditional) {
+          FocusManager.instance.highlightStrategy =
+              FocusHighlightStrategy.alwaysTraditional;
+        }
 
         // ── Global TV Scale ──────────────────────────────────────────────────
         // On LG webOS, Samsung Tizen, and Android TV the canvas is 1920×1080

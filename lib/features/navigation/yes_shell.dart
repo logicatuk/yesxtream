@@ -55,7 +55,7 @@ class _YesShellState extends ConsumerState<YesShell> {
     String location,
     AppSettings settings,
   ) {
-    final isTV = PlatformInfo.isTV || PlatformInfo.isAndroid;
+    final isTV = PlatformInfo.isTV;
     final scale = PlatformInfo.tvScaleFactor(context);
     final barHeight = isTV ? (58 * scale).clamp(58.0, 110.0) : 58.0;
     final logoSize = (32 * scale).clamp(32.0, 56.0);
@@ -74,48 +74,63 @@ class _YesShellState extends ConsumerState<YesShell> {
       ),
       child: LayoutBuilder(
         builder: (context, constraints) {
-          final isCompact = constraints.maxWidth < 960 || PlatformInfo.isMobile;
+          final isCompact = (!isTV && constraints.maxWidth < 960) || PlatformInfo.isMobile;
           final isVeryCompact = constraints.maxWidth < 500;
 
           return Row(
             children: [
               // ── 1. Left: Brand Logo & Name ──
-              InkWell(
-                onTap: () {
-                  try {
-                    ref.read(playerServiceProvider).stop();
-                  } catch (_) {}
-                  context.go('/home');
-                },
-                borderRadius: BorderRadius.circular(8),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(8),
-                        child: Image.asset(
-                          'assets/icon/yestream_logo.png',
-                          width: logoSize,
-                          height: logoSize,
-                          fit: BoxFit.contain,
-                        ),
-                      ),
-                      if (!isVeryCompact) ...[
-                        const SizedBox(width: 8),
-                        Text(
-                          'YESXTREAM',
-                          style: TextStyle(
-                            fontSize: titleFontSize,
-                            fontWeight: FontWeight.w900,
-                            letterSpacing: 1.1,
-                            color: Colors.white,
+              Focus(
+                canRequestFocus: false,
+                child: Builder(
+                  builder: (logoCtx) {
+                    final hasFocus = Focus.of(logoCtx).hasFocus;
+                    return InkWell(
+                      onTap: () {
+                        try {
+                          ref.read(playerServiceProvider).stop();
+                        } catch (_) {}
+                        context.go('/home');
+                      },
+                      borderRadius: BorderRadius.circular(8),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(
+                            color: hasFocus ? Colors.white : Colors.transparent,
+                            width: hasFocus ? 2.0 : 1.0,
                           ),
                         ),
-                      ],
-                    ],
-                  ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(8),
+                              child: Image.asset(
+                                'assets/icon/yestream_logo.png',
+                                width: logoSize,
+                                height: logoSize,
+                                fit: BoxFit.contain,
+                              ),
+                            ),
+                            if (!isVeryCompact) ...[
+                              const SizedBox(width: 8),
+                              Text(
+                                'YESXTREAM',
+                                style: TextStyle(
+                                  fontSize: titleFontSize,
+                                  fontWeight: FontWeight.w900,
+                                  letterSpacing: 1.1,
+                                  color: Colors.white,
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                    );
+                  },
                 ),
               ),
 
@@ -159,36 +174,47 @@ class _YesShellState extends ConsumerState<YesShell> {
               // ── 3. Desktop Search & Timer (Hidden on mobile/compact) ──
               if (!isCompact) ...[
                 const SizedBox(width: 14),
-                InkWell(
-                  onTap: () {
-                    try {
-                      ref.read(playerServiceProvider).stop();
-                    } catch (_) {}
-                    context.go('/search');
-                  },
-                  borderRadius: BorderRadius.circular(20),
-                  child: Container(
-                    width: constraints.maxWidth < 900 ? 180 : 280,
-                    height: 34,
-                    padding: const EdgeInsets.symmetric(horizontal: 14),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF161528),
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(color: const Color(0xFF2A2840)),
-                    ),
-                    child: const Row(
-                      children: [
-                        Icon(Icons.search_rounded, size: 16, color: Colors.white54),
-                        SizedBox(width: 10),
-                        Expanded(
-                          child: Text(
-                            'Search channels, movies, series...',
-                            style: TextStyle(color: Colors.white38, fontSize: 12),
-                            overflow: TextOverflow.ellipsis,
+                Focus(
+                  canRequestFocus: false,
+                  child: Builder(
+                    builder: (searchCtx) {
+                      final hasFocus = Focus.of(searchCtx).hasFocus;
+                      return InkWell(
+                        onTap: () {
+                          try {
+                            ref.read(playerServiceProvider).stop();
+                          } catch (_) {}
+                          context.go('/search');
+                        },
+                        borderRadius: BorderRadius.circular(20),
+                        child: Container(
+                          width: constraints.maxWidth < 900 ? 180 : 280,
+                          height: 34,
+                          padding: const EdgeInsets.symmetric(horizontal: 14),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF161528),
+                            borderRadius: BorderRadius.circular(20),
+                            border: Border.all(
+                              color: hasFocus ? Colors.white : const Color(0xFF2A2840),
+                              width: hasFocus ? 2.0 : 1.0,
+                            ),
+                          ),
+                          child: const Row(
+                            children: [
+                              Icon(Icons.search_rounded, size: 16, color: Colors.white54),
+                              SizedBox(width: 10),
+                              Expanded(
+                                child: Text(
+                                  'Search channels, movies, series...',
+                                  style: TextStyle(color: Colors.white38, fontSize: 12),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ],
                           ),
                         ),
-                      ],
-                    ),
+                      );
+                    },
                   ),
                 ),
                 const Spacer(),

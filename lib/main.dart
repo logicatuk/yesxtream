@@ -4,10 +4,16 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:media_kit/media_kit.dart';
 
 import 'app/app.dart';
+import 'core/platform_info.dart';
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   MediaKit.ensureInitialized();
+  await PlatformInfo.init();
+  if (PlatformInfo.isTV) {
+    FocusManager.instance.highlightStrategy =
+        FocusHighlightStrategy.alwaysTraditional;
+  }
 
   // True Fullscreen Immersive Sticky mode on Android & iOS (hides status & nav bars, full face)
   SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);

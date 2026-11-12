@@ -516,12 +516,19 @@ class _MovieDetailScreenState extends ConsumerState<MovieDetailScreen> {
                           alignment: isPortrait ? WrapAlignment.center : WrapAlignment.start,
                           children: [
                             FilledButton.icon(
+                              autofocus: true,
                               onPressed: () => _play(),
                               style: FilledButton.styleFrom(
                                 backgroundColor: const Color(0xFF6C5CE7),
                                 padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
                                 shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(10),
+                                ),
+                              ).copyWith(
+                                side: WidgetStateProperty.resolveWith(
+                                  (states) => states.contains(WidgetState.focused)
+                                      ? const BorderSide(color: Colors.white, width: 2.5)
+                                      : null,
                                 ),
                               ),
                               icon: const Icon(Icons.play_arrow_rounded, size: 22),

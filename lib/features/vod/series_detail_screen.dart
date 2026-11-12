@@ -808,6 +808,7 @@ class _SeriesDetailScreenState extends ConsumerState<SeriesDetailScreen> {
                                 runSpacing: 8,
                                 children: [
                                   FilledButton.icon(
+                                    autofocus: true,
                                     onPressed: () {
                                       if (_seasonDetail != null && _seasonDetail!.episodes.isNotEmpty) {
                                         _playEpisode(_seasonDetail!.episodes.first);
@@ -815,6 +816,12 @@ class _SeriesDetailScreenState extends ConsumerState<SeriesDetailScreen> {
                                     },
                                     style: FilledButton.styleFrom(
                                       backgroundColor: const Color(0xFF6C5CE7),
+                                    ).copyWith(
+                                      side: WidgetStateProperty.resolveWith(
+                                        (states) => states.contains(WidgetState.focused)
+                                            ? const BorderSide(color: Colors.white, width: 2.5)
+                                            : null,
+                                      ),
                                     ),
                                     icon: const Icon(Icons.play_arrow_rounded, size: 20),
                                     label: Text(settings.tr('play_episode')),

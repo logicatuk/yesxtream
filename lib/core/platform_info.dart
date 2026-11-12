@@ -1,24 +1,45 @@
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
 /// Detects the current platform type for UI adaptation.
 ///
-/// On Android TV, there is no touchscreen and the screen is typically
-/// large and landscape. We use these heuristics to decide whether to
-/// show the 10-foot TV UI (sidebar nav, large focus rings, D-pad nav)
-/// or the standard mobile/desktop UI.
+/// On Android TV / Fire TV, we query the native Android hardware/UI mode
+/// (LEANBACK / TELEVISION / amazon.hardware.fire_tv / no touchscreen) and fall
+/// back to MediaQuery heuristics on Web TVs (LG webOS, Samsung Tizen).
 class PlatformInfo {
   PlatformInfo._();
 
+  static const _platformChannel =
+      MethodChannel('io.github.clubanderson.clubtivi/platform');
+
   static bool? _isTvOverride;
+  static bool _nativeTvDetected = false;
+  static bool _nativeChecked = false;
 
   /// Force TV mode (useful for testing on desktop with keyboard).
   static void setTvOverride(bool value) => _isTvOverride = value;
 
+  /// Query native platform once before runApp() to reliably identify
+  /// Fire TV Stick, Android TV, and leanback/non-touch Android devices.
+  static Future<void> init() async {
+    if (_nativeChecked || !isAndroid) return;
+    _nativeChecked = true;
+    try {
+      final result = await _platformChannel.invokeMethod<bool>('isTvDevice');
+      if (result == true) {
+        _nativeTvDetected = true;
+        _detectedAsTV = true;
+      }
+    } catch (_) {
+      // Tests / headless runs where native plugin channel isn't mounted.
+    }
+  }
+
   /// True when running on a TV (Android TV, Fire TV, Samsung Tizen, LG webOS).
   static bool get isTV {
     if (_isTvOverride != null) return _isTvOverride!;
-    return _detectedAsTV;
+    return _nativeTvDetected || _detectedAsTV;
   }
 
   static bool get isAndroid => !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
@@ -35,19 +56,24 @@ class PlatformInfo {
     return isMacOS || isLinux || isWindows;
   }
 
-  /// Cached TV detection result (set after first MediaQuery access).
+  /// Cached TV detection result (set after first MediaQuery access or native init).
   static bool _detectedAsTV = false;
 
   /// Call this once from a widget that has access to [MediaQuery].
-  /// Detects TV by screen size, shortest side, and directional navigation mode.
+  /// Detects TV by native Android flags, screen size, shortest side, and
+  /// directional navigation mode.
   static void detectFromContext(BuildContext context) {
     if (_isTvOverride != null) return;
+    if (_nativeTvDetected) {
+      _detectedAsTV = true;
+      return;
+    }
 
     final data = MediaQuery.of(context);
     final size = data.size;
     final shortest = size.shortestSide;
     final hasDirectionalNav = data.navigationMode == NavigationMode.directional;
-    final isTvScreen = shortest >= 540 && size.width > size.height;
+    final isTvScreen = shortest >= 480 && size.width > size.height;
 
     if (kIsWeb) {
       _detectedAsTV = hasDirectionalNav || (isTvScreen && data.devicePixelRatio <= 2.0);

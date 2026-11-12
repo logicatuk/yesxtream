@@ -428,6 +428,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
 
     final key = event.logicalKey;
     final isTvInput = PlatformInfo.isTV || PlatformInfo.isAndroid;
+    if (_showOverlay) _autoHideOverlay();
 
     // Numerical channel jumping via remote number keys (e.g. 1 0 5 -> jump to channel 105)
     final digit = _getDigitFromKey(key);
@@ -436,19 +437,24 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
       return KeyEventResult.handled;
     }
 
-    // Select / Enter: if number is being entered, jump immediately! Otherwise toggle overlay
+    // Select / Enter: if number is being entered, jump immediately!
+    // When overlay & channel list are hidden, toggle overlay.
     if (key == LogicalKeyboardKey.select ||
         key == LogicalKeyboardKey.enter ||
+        key == LogicalKeyboardKey.numpadEnter ||
         key == LogicalKeyboardKey.gameButtonA) {
       if (_numberBuffer.isNotEmpty) {
         _executeNumberJump();
         return KeyEventResult.handled;
       }
-      _toggleOverlay();
-      return KeyEventResult.handled;
+      if (!_showOverlay && !_showChannelList) {
+        _toggleOverlay();
+        return KeyEventResult.handled;
+      }
+      return KeyEventResult.ignored;
     }
 
-    // Escape / Backspace / Back → close channel list or cancel number input first, then exit
+    // Escape / Backspace / Back → close channel list or overlay or cancel number input first, then exit
     if (key == LogicalKeyboardKey.escape ||
         key == LogicalKeyboardKey.backspace ||
         key == LogicalKeyboardKey.goBack) {
@@ -459,6 +465,10 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
       }
       if (_showChannelList) {
         setState(() => _showChannelList = false);
+        return KeyEventResult.handled;
+      }
+      if (_showOverlay && isTvInput) {
+        setState(() => _showOverlay = false);
         return KeyEventResult.handled;
       }
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -473,28 +483,46 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
       return KeyEventResult.handled;
     }
 
-    // Channel switching: use channelUp/Down on TV/Android, arrows elsewhere
+    // Channel switching: use channelUp/Down always, and Up/Down arrows when UI overlay is hidden
     if (key == LogicalKeyboardKey.channelUp ||
-        (!isTvInput && key == LogicalKeyboardKey.arrowUp)) {
+        key == LogicalKeyboardKey.pageUp ||
+        ((!isTvInput || (!_showOverlay && !_showChannelList)) &&
+            key == LogicalKeyboardKey.arrowUp)) {
       _switchChannel(-1);
       return KeyEventResult.handled;
     }
 
     if (key == LogicalKeyboardKey.channelDown ||
-        (!isTvInput && key == LogicalKeyboardKey.arrowDown)) {
+        key == LogicalKeyboardKey.pageDown ||
+        ((!isTvInput || (!_showOverlay && !_showChannelList)) &&
+            key == LogicalKeyboardKey.arrowDown)) {
       _switchChannel(1);
       return KeyEventResult.handled;
     }
 
-    // Volume: only on desktop (D-pad arrows needed for focus on TV/Android)
-    if (!isTvInput && key == LogicalKeyboardKey.arrowLeft) {
-      _adjustVolume(-5);
-      return KeyEventResult.handled;
+    // Volume on desktop, or reveal overlay/channel list with Left/Right on TV when hidden
+    if (key == LogicalKeyboardKey.arrowLeft) {
+      if (!isTvInput) {
+        _adjustVolume(-5);
+        return KeyEventResult.handled;
+      }
+      if (!_showOverlay && !_showChannelList && widget.channels.isNotEmpty) {
+        setState(() => _showChannelList = true);
+        return KeyEventResult.handled;
+      }
+      return KeyEventResult.ignored;
     }
 
-    if (!isTvInput && key == LogicalKeyboardKey.arrowRight) {
-      _adjustVolume(5);
-      return KeyEventResult.handled;
+    if (key == LogicalKeyboardKey.arrowRight) {
+      if (!isTvInput) {
+        _adjustVolume(5);
+        return KeyEventResult.handled;
+      }
+      if (!_showOverlay && !_showChannelList) {
+        _toggleOverlay();
+        return KeyEventResult.handled;
+      }
+      return KeyEventResult.ignored;
     }
 
     if (key == LogicalKeyboardKey.mediaPlayPause ||
@@ -836,8 +864,10 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                               final name = ch['name'] as String? ?? '';
                               final isCurrent = i == _channelIndex;
                               return ListTile(
+                                autofocus: isCurrent,
                                 dense: true,
                                 selected: isCurrent,
+                                focusColor: const Color(0xFF6C5CE7).withValues(alpha: 0.45),
                                 selectedTileColor: const Color(0xFF6C5CE7).withValues(alpha: 0.3),
                                 leading: ch['tvgLogo'] != null
                                     ? Image.network(ch['tvgLogo'] as String, width: 28, height: 28, errorBuilder: (_, __, ___) => const Icon(Icons.tv, size: 28, color: Colors.white30))

@@ -180,21 +180,24 @@ class _AddProviderPageState extends ConsumerState<_AddProviderPage> {
 
   @override
   Widget build(BuildContext context) {
+    void handleBack() {
+      final pf = FocusManager.instance.primaryFocus;
+      if (pf?.context?.findAncestorWidgetOfExactType<EditableText>() != null) {
+        pf!.unfocus();
+        return;
+      }
+      Future.microtask(() {
+        if (context.mounted) Navigator.of(context).pop();
+      });
+    }
+
     return CallbackShortcuts(
       bindings: {
-        const SingleActivator(LogicalKeyboardKey.escape): () {
-          final pf = FocusManager.instance.primaryFocus;
-          if (pf?.context?.findAncestorWidgetOfExactType<EditableText>() != null) {
-            pf!.unfocus();
-            return;
-          }
-          Future.microtask(() {
-            Navigator.of(context).pop();
-          });
-        },
+        const SingleActivator(LogicalKeyboardKey.escape): handleBack,
+        const SingleActivator(LogicalKeyboardKey.goBack): handleBack,
       },
       child: Focus(
-        autofocus: true,
+        canRequestFocus: false,
         child: Scaffold(
       backgroundColor: const Color(0xFF0A0A0F),
       appBar: AppBar(

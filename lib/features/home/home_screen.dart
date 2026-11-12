@@ -665,6 +665,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             ),
             const SizedBox(height: 28),
             FilledButton.icon(
+              autofocus: true,
               onPressed: () => showAddProviderDialog(context),
               style: FilledButton.styleFrom(
                 backgroundColor: const Color(0xFF6C5CE7),
@@ -672,6 +673,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     const EdgeInsets.symmetric(horizontal: 26, vertical: 14),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(10),
+                ),
+              ).copyWith(
+                side: WidgetStateProperty.resolveWith(
+                  (states) => states.contains(WidgetState.focused)
+                      ? const BorderSide(color: Colors.white, width: 3)
+                      : null,
                 ),
               ),
               icon: const Icon(Icons.add_rounded, size: 20),
@@ -865,11 +872,18 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               Align(
                 alignment: Alignment.centerRight,
                 child: FilledButton(
+                  autofocus: true,
                   onPressed: () => Navigator.of(ctx).pop(),
                   style: FilledButton.styleFrom(
                     backgroundColor: const Color(0xFF6C5CE7),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(8),
+                    ),
+                  ).copyWith(
+                    side: WidgetStateProperty.resolveWith(
+                      (states) => states.contains(WidgetState.focused)
+                          ? const BorderSide(color: Colors.white, width: 2.5)
+                          : null,
                     ),
                   ),
                   child: const Text('OK'),
@@ -1009,77 +1023,90 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                             final p = playlists[index];
                             final isCurrent = p.id == activePlaylist?.id;
 
-                            return InkWell(
-                              onTap: () {
-                                Navigator.of(ctx).pop();
-                                ref
-                                    .read(activePlaylistIdProvider.notifier)
-                                    .selectPlaylist(p.id);
-                              },
-                              borderRadius: BorderRadius.circular(10),
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 14,
-                                  vertical: 12,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: isCurrent
-                                      ? const Color(0xFF6C5CE7)
-                                          .withValues(alpha: 0.2)
-                                      : const Color(0xFF181728),
-                                  borderRadius: BorderRadius.circular(10),
-                                  border: Border.all(
-                                    color: isCurrent
-                                        ? const Color(0xFF6C5CE7)
-                                        : const Color(0xFF26243A),
-                                    width: isCurrent ? 1.5 : 1,
-                                  ),
-                                ),
-                                child: Row(
-                                  children: [
-                                    Icon(
-                                      p.type == 'xtream'
-                                          ? Icons.bolt_rounded
-                                          : Icons.link_rounded,
-                                      color: isCurrent
-                                          ? const Color(0xFFA29BFE)
-                                          : Colors.white60,
-                                      size: 20,
-                                    ),
-                                    const SizedBox(width: 12),
-                                    Expanded(
-                                      child: Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
+                            return Focus(
+                              canRequestFocus: false,
+                              child: Builder(
+                                builder: (rowCtx) {
+                                  final hasFocus = Focus.of(rowCtx).hasFocus;
+                                  return InkWell(
+                                    autofocus: isCurrent || index == 0,
+                                    onTap: () {
+                                      Navigator.of(ctx).pop();
+                                      ref
+                                          .read(activePlaylistIdProvider.notifier)
+                                          .selectPlaylist(p.id);
+                                    },
+                                    borderRadius: BorderRadius.circular(10),
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 14,
+                                        vertical: 12,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: hasFocus
+                                            ? const Color(0xFF6C5CE7).withValues(alpha: 0.35)
+                                            : isCurrent
+                                                ? const Color(0xFF6C5CE7)
+                                                    .withValues(alpha: 0.2)
+                                                : const Color(0xFF181728),
+                                        borderRadius: BorderRadius.circular(10),
+                                        border: Border.all(
+                                          color: hasFocus
+                                              ? Colors.white
+                                              : isCurrent
+                                                  ? const Color(0xFF6C5CE7)
+                                                  : const Color(0xFF26243A),
+                                          width: hasFocus ? 2.5 : (isCurrent ? 1.5 : 1),
+                                        ),
+                                      ),
+                                      child: Row(
                                         children: [
-                                          Text(
-                                            p.name,
-                                            style: TextStyle(
-                                              color: Colors.white,
-                                              fontSize: 14,
-                                              fontWeight: isCurrent
-                                                  ? FontWeight.bold
-                                                  : FontWeight.w500,
+                                          Icon(
+                                            p.type == 'xtream'
+                                                ? Icons.bolt_rounded
+                                                : Icons.link_rounded,
+                                            color: isCurrent
+                                                ? const Color(0xFFA29BFE)
+                                                : Colors.white60,
+                                            size: 20,
+                                          ),
+                                          const SizedBox(width: 12),
+                                          Expanded(
+                                            child: Column(
+                                              crossAxisAlignment:
+                                                  CrossAxisAlignment.start,
+                                              children: [
+                                                Text(
+                                                  p.name,
+                                                  style: TextStyle(
+                                                    color: Colors.white,
+                                                    fontSize: 14,
+                                                    fontWeight: isCurrent
+                                                        ? FontWeight.bold
+                                                        : FontWeight.w500,
+                                                  ),
+                                                ),
+                                                Text(
+                                                  p.type.toUpperCase(),
+                                                  style: const TextStyle(
+                                                    color: Colors.white54,
+                                                    fontSize: 11,
+                                                  ),
+                                                ),
+                                              ],
                                             ),
                                           ),
-                                          Text(
-                                            p.type.toUpperCase(),
-                                            style: const TextStyle(
-                                              color: Colors.white54,
-                                              fontSize: 11,
+                                          if (isCurrent)
+                                            const Icon(
+                                              Icons.check_circle_rounded,
+                                              color: Color(0xFF00B894),
+                                              size: 20,
                                             ),
-                                          ),
                                         ],
                                       ),
                                     ),
-                                    if (isCurrent)
-                                      const Icon(
-                                        Icons.check_circle_rounded,
-                                        color: Color(0xFF00B894),
-                                        size: 20,
-                                      ),
-                                  ],
-                                ),
+                                  );
+                                },
                               ),
                             );
                           },
@@ -1199,12 +1226,19 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                 children: [
                   Expanded(
                     child: OutlinedButton(
+                      autofocus: true,
                       onPressed: () => Navigator.of(ctx).pop(),
                       style: OutlinedButton.styleFrom(
                         foregroundColor: Colors.white70,
                         side: const BorderSide(color: Color(0xFF26243A)),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(8),
+                        ),
+                      ).copyWith(
+                        side: WidgetStateProperty.resolveWith(
+                          (states) => states.contains(WidgetState.focused)
+                              ? const BorderSide(color: Colors.white, width: 2.5)
+                              : const BorderSide(color: Color(0xFF26243A)),
                         ),
                       ),
                       child: Text(settings.tr('exit_dialog_cancel')),
@@ -1227,6 +1261,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                         backgroundColor: const Color(0xFF6C5CE7),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(8),
+                        ),
+                      ).copyWith(
+                        side: WidgetStateProperty.resolveWith(
+                          (states) => states.contains(WidgetState.focused)
+                              ? const BorderSide(color: Colors.white, width: 2.5)
+                              : null,
                         ),
                       ),
                       child: Text(settings.tr('exit_dialog_confirm')),
@@ -1348,6 +1388,9 @@ class _TvHeroTileState extends State<_TvHeroTile> {
       onShowHoverHighlight: isTV ? null : (h) => setState(() => _isHovered = h),
       actions: {
         ActivateIntent: CallbackAction<ActivateIntent>(
+          onInvoke: (_) => widget.onTap(),
+        ),
+        ButtonActivateIntent: CallbackAction<ButtonActivateIntent>(
           onInvoke: (_) => widget.onTap(),
         ),
       },
@@ -1531,6 +1574,9 @@ class _TvGridTileState extends State<_TvGridTile> {
         ActivateIntent: CallbackAction<ActivateIntent>(
           onInvoke: (_) => widget.onTap(),
         ),
+        ButtonActivateIntent: CallbackAction<ButtonActivateIntent>(
+          onInvoke: (_) => widget.onTap(),
+        ),
       },
       child: GestureDetector(
         onTap: widget.onTap,
@@ -1671,6 +1717,9 @@ class _TvGridTileHorizontalState extends State<_TvGridTileHorizontal> {
         ActivateIntent: CallbackAction<ActivateIntent>(
           onInvoke: (_) => widget.onTap(),
         ),
+        ButtonActivateIntent: CallbackAction<ButtonActivateIntent>(
+          onInvoke: (_) => widget.onTap(),
+        ),
       },
       child: GestureDetector(
         onTap: widget.onTap,
@@ -1776,6 +1825,9 @@ class _TvActionButtonState extends State<_TvActionButton> {
       onShowHoverHighlight: isTV ? null : (h) => setState(() => _isHovered = h),
       actions: {
         ActivateIntent: CallbackAction<ActivateIntent>(
+          onInvoke: (_) => widget.onTap(),
+        ),
+        ButtonActivateIntent: CallbackAction<ButtonActivateIntent>(
           onInvoke: (_) => widget.onTap(),
         ),
       },

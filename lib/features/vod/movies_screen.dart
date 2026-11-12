@@ -31,6 +31,10 @@ class _MoviesScreenState extends ConsumerState<MoviesScreen> {
   final _searchController = TextEditingController();
   final _categorySearchController = TextEditingController();
   final _scrollController = ScrollController();
+  late final FocusNode _categoryFilterFocusNode =
+      FocusNode(skipTraversal: PlatformInfo.isTV);
+  late final FocusNode _gridSearchFocusNode =
+      FocusNode(skipTraversal: PlatformInfo.isTV);
 
   Map<String, int> _categoryCounts = {};
   List<String> _sortedGroups = [];
@@ -205,6 +209,8 @@ class _MoviesScreenState extends ConsumerState<MoviesScreen> {
     _scrollController.dispose();
     _searchController.dispose();
     _categorySearchController.dispose();
+    _categoryFilterFocusNode.dispose();
+    _gridSearchFocusNode.dispose();
     super.dispose();
   }
 
@@ -258,7 +264,7 @@ class _MoviesScreenState extends ConsumerState<MoviesScreen> {
           backgroundColor: const Color(0xFF0A0A0F),
           body: LayoutBuilder(
         builder: (context, constraints) {
-          final isCompact = constraints.maxWidth < 750;
+          final isCompact = !PlatformInfo.isTV && constraints.maxWidth < 750;
           if (isCompact) {
             return _buildCompactLayout(
               context,
@@ -292,47 +298,73 @@ class _MoviesScreenState extends ConsumerState<MoviesScreen> {
                       child: Row(
                         children: [
                           Expanded(
-                            child: InkWell(
-                              onTap: () => context.go('/home'),
-                              borderRadius: BorderRadius.circular(6),
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(vertical: 6),
-                                decoration: BoxDecoration(
-                                  color: const Color(0xFF1B1A2C),
-                                  borderRadius: BorderRadius.circular(6),
-                                  border: Border.all(color: const Color(0xFF2A2840)),
-                                ),
-                                child: const Row(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    Icon(Icons.arrow_back_rounded, size: 14, color: Colors.white70),
-                                    SizedBox(width: 4),
-                                    Text('Back', style: TextStyle(color: Colors.white70, fontSize: 12)),
-                                  ],
-                                ),
+                            child: Focus(
+                              canRequestFocus: false,
+                              child: Builder(
+                                builder: (btnCtx) {
+                                  final hasFocus = Focus.of(btnCtx).hasFocus;
+                                  return InkWell(
+                                    onTap: () => context.go('/home'),
+                                    borderRadius: BorderRadius.circular(6),
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(vertical: 6),
+                                      decoration: BoxDecoration(
+                                        color: hasFocus
+                                            ? const Color(0xFF6C5CE7).withValues(alpha: 0.35)
+                                            : const Color(0xFF1B1A2C),
+                                        borderRadius: BorderRadius.circular(6),
+                                        border: Border.all(
+                                          color: hasFocus ? Colors.white : const Color(0xFF2A2840),
+                                          width: hasFocus ? 2.0 : 1.0,
+                                        ),
+                                      ),
+                                      child: const Row(
+                                        mainAxisAlignment: MainAxisAlignment.center,
+                                        children: [
+                                          Icon(Icons.arrow_back_rounded, size: 14, color: Colors.white70),
+                                          SizedBox(width: 4),
+                                          Text('Back', style: TextStyle(color: Colors.white70, fontSize: 12)),
+                                        ],
+                                      ),
+                                    ),
+                                  );
+                                },
                               ),
                             ),
                           ),
                           const SizedBox(width: 8),
                           Expanded(
-                            child: InkWell(
-                              onTap: () => context.go('/search'),
-                              borderRadius: BorderRadius.circular(6),
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(vertical: 6),
-                                decoration: BoxDecoration(
-                                  color: const Color(0xFF1B1A2C),
-                                  borderRadius: BorderRadius.circular(6),
-                                  border: Border.all(color: const Color(0xFF2A2840)),
-                                ),
-                                child: const Row(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    Icon(Icons.search_rounded, size: 14, color: Colors.white70),
-                                    SizedBox(width: 4),
-                                    Text('Search', style: TextStyle(color: Colors.white70, fontSize: 12)),
-                                  ],
-                                ),
+                            child: Focus(
+                              canRequestFocus: false,
+                              child: Builder(
+                                builder: (btnCtx) {
+                                  final hasFocus = Focus.of(btnCtx).hasFocus;
+                                  return InkWell(
+                                    onTap: () => context.go('/search'),
+                                    borderRadius: BorderRadius.circular(6),
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(vertical: 6),
+                                      decoration: BoxDecoration(
+                                        color: hasFocus
+                                            ? const Color(0xFF6C5CE7).withValues(alpha: 0.35)
+                                            : const Color(0xFF1B1A2C),
+                                        borderRadius: BorderRadius.circular(6),
+                                        border: Border.all(
+                                          color: hasFocus ? Colors.white : const Color(0xFF2A2840),
+                                          width: hasFocus ? 2.0 : 1.0,
+                                        ),
+                                      ),
+                                      child: const Row(
+                                        mainAxisAlignment: MainAxisAlignment.center,
+                                        children: [
+                                          Icon(Icons.search_rounded, size: 14, color: Colors.white70),
+                                          SizedBox(width: 4),
+                                          Text('Search', style: TextStyle(color: Colors.white70, fontSize: 12)),
+                                        ],
+                                      ),
+                                    ),
+                                  );
+                                },
                               ),
                             ),
                           ),
@@ -346,6 +378,7 @@ class _MoviesScreenState extends ConsumerState<MoviesScreen> {
                       child: SizedBox(
                         height: 32,
                         child: TextField(
+                          focusNode: _categoryFilterFocusNode,
                           controller: _categorySearchController,
                           onChanged: (val) => setState(() => _categorySearchQuery = val),
                           style: const TextStyle(color: Colors.white, fontSize: 12),
@@ -700,47 +733,62 @@ class _MoviesScreenState extends ConsumerState<MoviesScreen> {
     required bool isSelected,
     required VoidCallback onTap,
   }) {
-    return InkWell(
-      onTap: onTap,
-      child: Container(
-        height: 42,
-        padding: const EdgeInsets.symmetric(horizontal: 14),
-        decoration: BoxDecoration(
-          color: isSelected
-              ? const Color(0xFF6C5CE7).withValues(alpha: 0.22)
-              : Colors.transparent,
-          border: Border(
-            bottom: const BorderSide(color: Color(0xFF1E1D2F), width: 1),
-            left: isSelected
-                ? const BorderSide(color: Color(0xFFFFD32A), width: 3.5)
-                : BorderSide.none,
-          ),
-        ),
-        child: Row(
-          children: [
-            Expanded(
-              child: Text(
-                title,
-                style: TextStyle(
-                  color: isSelected ? const Color(0xFFFFD32A) : Colors.white,
-                  fontSize: 13,
-                  fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
-                ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
+    return Focus(
+      canRequestFocus: false,
+      child: Builder(
+        builder: (itemCtx) {
+          final hasFocus = Focus.of(itemCtx).hasFocus;
+          return InkWell(
+            autofocus: isSelected && PlatformInfo.isTV,
+            onTap: onTap,
+            child: Container(
+              height: 42,
+              padding: const EdgeInsets.symmetric(horizontal: 14),
+              decoration: BoxDecoration(
+                color: hasFocus
+                    ? const Color(0xFF6C5CE7).withValues(alpha: 0.35)
+                    : isSelected
+                        ? const Color(0xFF6C5CE7).withValues(alpha: 0.22)
+                        : Colors.transparent,
+                border: hasFocus
+                    ? Border.all(color: Colors.white, width: 2.0)
+                    : Border(
+                        bottom: const BorderSide(color: Color(0xFF1E1D2F), width: 1),
+                        left: isSelected
+                            ? const BorderSide(color: Color(0xFFFFD32A), width: 3.5)
+                            : BorderSide.none,
+                      ),
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      title,
+                      style: TextStyle(
+                        color: isSelected
+                            ? const Color(0xFFFFD32A)
+                            : (hasFocus ? Colors.white : Colors.white.withValues(alpha: 0.9)),
+                        fontSize: 13,
+                        fontWeight: (isSelected || hasFocus) ? FontWeight.bold : FontWeight.w500,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    '$count',
+                    style: TextStyle(
+                      color: isSelected ? const Color(0xFFFFD32A) : Colors.white54,
+                      fontSize: 12,
+                      fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                    ),
+                  ),
+                ],
               ),
             ),
-            const SizedBox(width: 8),
-            Text(
-              '$count',
-              style: TextStyle(
-                color: isSelected ? const Color(0xFFFFD32A) : Colors.white38,
-                fontSize: 12,
-                fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-              ),
-            ),
-          ],
-        ),
+          );
+        },
       ),
     );
   }
@@ -786,6 +834,7 @@ class _MoviesScreenState extends ConsumerState<MoviesScreen> {
             width: 220,
             height: 34,
             child: TextField(
+              focusNode: _gridSearchFocusNode,
               controller: _searchController,
               onChanged: _onSearchChanged,
               style: const TextStyle(color: Colors.white, fontSize: 12),

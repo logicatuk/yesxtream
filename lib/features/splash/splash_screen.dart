@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shimmer/shimmer.dart';
 
+import '../../core/platform_info.dart';
+
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
 
@@ -35,7 +37,7 @@ class _SplashScreenState extends State<SplashScreen>
   static const _surface = Color(0xFF0A0A0F);
 
   // TV mode: skip GPU-heavy effects (CustomPaint, shimmer, glow loop) on Android TV & Smart TV webOS/Tizen
-  static final bool _isTV = kIsWeb || defaultTargetPlatform == TargetPlatform.android;
+  static bool get _isTV => kIsWeb || PlatformInfo.isTV;
 
   @override
   void initState() {
