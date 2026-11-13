@@ -11,6 +11,7 @@ import '../../core/platform_info.dart';
 import '../../core/tv_exit_helper.dart';
 import '../../data/datasources/local/database.dart' as db;
 import '../../data/services/app_settings.dart';
+import '../../data/services/app_update_service.dart';
 import '../playlists/playlist_providers.dart';
 import '../providers/add_provider_dialog.dart';
 import '../providers/provider_manager.dart';
@@ -605,11 +606,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   // ── Footer
   // ─────────────────────────────────────────────────────────────
   Widget _buildFooter() {
-    return const Align(
+    return Align(
       alignment: Alignment.bottomRight,
       child: Text(
-        'v4.3',
-        style: TextStyle(
+        'v${AppUpdateService.currentVersion}',
+        style: const TextStyle(
           color: Colors.white54,
           fontSize: 12,
           fontWeight: FontWeight.w500,
