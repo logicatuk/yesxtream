@@ -622,10 +622,16 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
     _startTopBarFade();
   }
 
-  /// Ensure legacy default third-party sources are cleaned up (EPG comes from provider).
+  /// Sync IPTV provider EPG sources and refresh guide data in background.
   Future<void> _ensureEpgSources() async {
     final epgService = ref.read(epgRefreshServiceProvider);
-    await epgService.cleanupLegacyDefaultSources();
+    await epgService.syncProviderEpgSources();
+    epgService.refreshAllSources().then((_) {
+      debugPrint('[EPG] Background provider EPG refresh complete');
+      if (mounted) _loadChannels(silent: true);
+    }).catchError((e) {
+      debugPrint('[EPG] Background provider EPG refresh failed: $e');
+    });
   }
 
   @override

@@ -9,11 +9,9 @@ import '../../data/datasources/local/database.dart' as db;
 import '../../data/services/app_settings.dart';
 import '../../data/services/app_update_service.dart';
 import '../../data/services/device_identity_service.dart';
-import '../../data/services/epg_refresh_service.dart';
 import '../../data/services/playback_history_service.dart';
 import '../player/player_service.dart';
 import '../providers/provider_manager.dart';
-import 'add_epg_source_dialog.dart';
 
 enum SettingsGroup {
   general('General', Icons.tune_rounded),
@@ -601,21 +599,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             ),
             const Divider(color: Color(0xFF26243A), height: 1),
 
-            // EPG Sources
-            ListTile(
-              leading: const Icon(Icons.source_rounded, color: Colors.white70),
-              title: const Text('EPG Sources', style: TextStyle(color: Colors.white)),
-              subtitle: const Text('Manage XMLTV feeds and custom guide sources',
-                  style: TextStyle(color: Colors.white54, fontSize: 12)),
-              trailing: const Icon(Icons.chevron_right_rounded, color: Colors.white54),
-              onTap: () {
-                Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const _EpgSourcesScreen()),
-                );
-              },
-            ),
-            const Divider(color: Color(0xFF26243A), height: 1),
-
             // Auto Refresh Interval
             _AutoRefreshTile(),
           ],
@@ -1153,140 +1136,6 @@ Future<void> _downloadUpdate(BuildContext context, String apkUrl) async {
   );
   if (context.mounted) Navigator.of(context).pop();
 }
-
-class _EpgSourcesScreen extends ConsumerStatefulWidget {
-  const _EpgSourcesScreen();
-
-  @override
-  ConsumerState<_EpgSourcesScreen> createState() => _EpgSourcesScreenState();
-}
-
-class _EpgSourcesScreenState extends ConsumerState<_EpgSourcesScreen> {
-  List<db.EpgSource> _sources = [];
-  final Set<String> _refreshing = {};
-  bool _loading = true;
-  String? _error;
-
-  @override
-  void initState() {
-    super.initState();
-    _loadSources();
-  }
-
-  Future<void> _loadSources() async {
-    try {
-      final sources = await ref.read(databaseProvider).getAllEpgSources();
-      if (!mounted) return;
-      setState(() {
-        _sources = sources;
-        _loading = false;
-        _error = null;
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _loading = false;
-        _error = e.toString();
-      });
-    }
-  }
-
-  Future<void> _refreshSource(String id) async {
-    setState(() => _refreshing.add(id));
-    try {
-      await ref.read(epgRefreshServiceProvider).refreshSource(id);
-      await _loadSources();
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Refresh complete')),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e')),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _refreshing.remove(id));
-    }
-  }
-
-  Future<void> _deleteSource(String id) async {
-    try {
-      await ref.read(databaseProvider).deleteEpgSource(id);
-      if (!mounted) return;
-      await _loadSources();
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Delete failed: $e')),
-      );
-    }
-  }
-
-  Future<void> _showAddDialog() async {
-    final result = await showDialog<bool>(
-      context: context,
-      builder: (_) => const AddEpgSourceDialog(),
-    );
-    if (result == true && mounted) await _loadSources();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: const Color(0xFF0A0A0F),
-      appBar: AppBar(
-        backgroundColor: const Color(0xFF0D0D14),
-        title: const Text('EPG Sources'),
-      ),
-      floatingActionButton: FloatingActionButton(
-        backgroundColor: const Color(0xFF6C5CE7),
-        onPressed: _showAddDialog,
-        child: const Icon(Icons.add),
-      ),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : _error != null
-              ? Center(child: Text('Error: $_error', style: const TextStyle(color: Colors.white70)))
-              : _sources.isEmpty
-                  ? const Center(child: Text('No EPG sources configured', style: TextStyle(color: Colors.white38)))
-                  : ListView.builder(
-                      itemCount: _sources.length,
-                      itemBuilder: (context, index) {
-                        final source = _sources[index];
-                        final isRefreshing = _refreshing.contains(source.id);
-                        return ListTile(
-                          title: Text(source.name, style: const TextStyle(color: Colors.white)),
-                          subtitle: Text(source.url, style: const TextStyle(color: Colors.white38)),
-                          trailing: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              if (isRefreshing)
-                                const SizedBox(
-                                  width: 20,
-                                  height: 20,
-                                  child: CircularProgressIndicator(strokeWidth: 2),
-                                )
-                              else
-                                IconButton(
-                                  icon: const Icon(Icons.refresh, color: Colors.white70),
-                                  onPressed: () => _refreshSource(source.id),
-                                ),
-                              IconButton(
-                                icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
-                                onPressed: () => _deleteSource(source.id),
-                              ),
-                            ],
-                          ),
-                        );
-                      },
-                    ),
-    );
-  }
-}
-
 
 class _AutoRefreshTile extends StatefulWidget {
   @override

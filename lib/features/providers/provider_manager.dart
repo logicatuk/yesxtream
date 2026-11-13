@@ -7,6 +7,7 @@ import '../../data/datasources/parsers/m3u_parser.dart';
 import '../../data/datasources/remote/xtream_client.dart';
 import '../../data/models/channel.dart' hide Provider;
 import '../../data/services/logo_resolver_service.dart';
+import '../../data/services/epg_refresh_service.dart';
 import '../../core/feature_gate.dart';
 import 'package:dio/dio.dart';
 
@@ -199,6 +200,12 @@ class ProviderManager {
     if (liveOnly.isNotEmpty) {
       _resolveChannelLogos(liveOnly).catchError((_) {});
     }
+
+    // Auto-sync and refresh EPG from provider credentials
+    final epgService = EpgRefreshService(_db);
+    epgService.syncProviderEpgSources().then((_) {
+      epgService.refreshSource('epg_$providerId').catchError((_) {});
+    }).catchError((_) {});
   }
 
   /// Refresh a provider's channels from its source.
@@ -250,6 +257,12 @@ class ProviderManager {
     if (liveOnly.isNotEmpty) {
       _resolveChannelLogos(liveOnly).catchError((_) {});
     }
+
+    // Auto-sync and refresh EPG from provider credentials
+    final epgService = EpgRefreshService(_db);
+    epgService.syncProviderEpgSources().then((_) {
+      epgService.refreshSource('epg_$providerId').catchError((_) {});
+    }).catchError((_) {});
 
     return channels.length;
   }
@@ -436,6 +449,7 @@ class ProviderManager {
 
   Future<void> deleteProvider(String id) async {
     await _db.deleteProvider(id);
+    await _db.deleteEpgSource('epg_$id').catchError((_) {});
     final prefs = await SharedPreferences.getInstance();
     if (prefs.getString('active_playlist_id') == id) {
       await prefs.remove('active_playlist_id');

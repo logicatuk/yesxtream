@@ -144,9 +144,43 @@ class EpgRefreshService {
     }
   }
 
+  /// Automatically registers XMLTV EPG sources for Xtream / M3U providers in the database.
+  Future<void> syncProviderEpgSources() async {
+    await cleanupLegacyDefaultSources();
+    final providers = await _db.getAllProviders();
+
+    for (final p in providers) {
+      String? epgUrl;
+      if (p.type == 'xtream' && p.url != null && p.url!.isNotEmpty) {
+        final cleanBase = p.url!.trim().replaceAll(RegExp(r'/+$'), '');
+        final user = Uri.encodeComponent(p.username ?? '');
+        final pass = Uri.encodeComponent(p.password ?? '');
+        epgUrl = '$cleanBase/xmltv.php?username=$user&password=$pass';
+      } else if (p.type == 'm3u' && p.url != null) {
+        final creds = parseXtreamFromM3uUrl(p.url!);
+        if (creds != null) {
+          final cleanBase = creds.baseUrl.trim().replaceAll(RegExp(r'/+$'), '');
+          final user = Uri.encodeComponent(creds.username);
+          final pass = Uri.encodeComponent(creds.password);
+          epgUrl = '$cleanBase/xmltv.php?username=$user&password=$pass';
+        }
+      }
+
+      if (epgUrl != null && epgUrl.isNotEmpty) {
+        final sourceId = 'epg_${p.id}';
+        await _db.upsertEpgSource(db.EpgSourcesCompanion.insert(
+          id: sourceId,
+          name: '${p.name} EPG',
+          url: epgUrl,
+          enabled: const Value(true),
+        ));
+      }
+    }
+  }
+
   /// Kept for API compatibility; cleans up legacy third-party feeds without seeding external ones.
   Future<void> addDefaultSources() async {
-    await cleanupLegacyDefaultSources();
+    await syncProviderEpgSources();
   }
 
   /// Delete all existing sources.
