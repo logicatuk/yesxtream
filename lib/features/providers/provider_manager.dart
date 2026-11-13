@@ -156,29 +156,37 @@ class ProviderManager {
     onProgress?.call(4, 'Saving ${channels.length} items...');
     await _db.upsertProvider(providerEntry);
     try {
-      final companions = List<db.ChannelsCompanion>.generate(channels.length, (i) {
-        final c = channels[i];
-        return db.ChannelsCompanion.insert(
-          id: c.id,
-          providerId: c.providerId,
-          name: c.name,
-          tvgId: Value(c.tvgId),
-          tvgName: Value(c.tvgName),
-          tvgLogo: Value(c.tvgLogo),
-          groupTitle: Value(c.groupTitle),
-          channelNumber: Value(c.channelNumber),
-          streamUrl: c.streamUrl,
-          streamType: Value(c.streamType.name),
-          sortOrder: Value(i),
-        );
-      });
+      const batchSize = 3000;
+      final total = channels.length;
+      for (var i = 0; i < total; i += batchSize) {
+        final end = (i + batchSize < total) ? i + batchSize : total;
+        final slice = channels.sublist(i, end);
+        final companions = List<db.ChannelsCompanion>.generate(slice.length, (idx) {
+          final c = slice[idx];
+          return db.ChannelsCompanion.insert(
+            id: c.id,
+            providerId: c.providerId,
+            name: c.name,
+            tvgId: Value(c.tvgId),
+            tvgName: Value(c.tvgName),
+            tvgLogo: Value(c.tvgLogo),
+            groupTitle: Value(c.groupTitle),
+            channelNumber: Value(c.channelNumber),
+            streamUrl: c.streamUrl,
+            streamType: Value(c.streamType.name),
+            sortOrder: Value(i + idx),
+          );
+        });
 
-      await _db.upsertChannels(
-        companions,
-        onProgress: (saved, total) {
-          onProgress?.call(4, 'Saving $saved / $total...');
-        },
-      );
+        await _db.upsertChannels(
+          companions,
+          onProgress: (saved, _) {
+            onProgress?.call(4, 'Saving ${i + saved} / $total...');
+          },
+        );
+        // Yield so Android / Fire TV garbage collector can free intermediate companions
+        await Future<void>.delayed(const Duration(milliseconds: 5));
+      }
     } catch (e) {
       // Roll back the orphaned provider row so UI never shows 0 Live / 0 Movies / 0 Series
       try {
@@ -187,7 +195,7 @@ class ProviderManager {
       rethrow;
     }
 
-    final liveOnly = channels.where((c) => c.streamType == StreamType.live).toList();
+    final liveOnly = channels.where((c) => c.streamType == StreamType.live).take(250).toList();
     if (liveOnly.isNotEmpty) {
       _resolveChannelLogos(liveOnly).catchError((_) {});
     }
@@ -211,27 +219,34 @@ class ProviderManager {
       throw Exception('No channels found for this provider.');
     }
 
-    // Save channels to database
-    final companions = List<db.ChannelsCompanion>.generate(channels.length, (i) {
-      final c = channels[i];
-      return db.ChannelsCompanion.insert(
-        id: c.id,
-        providerId: c.providerId,
-        name: c.name,
-        tvgId: Value(c.tvgId),
-        tvgName: Value(c.tvgName),
-        tvgLogo: Value(c.tvgLogo),
-        groupTitle: Value(c.groupTitle),
-        channelNumber: Value(c.channelNumber),
-        streamUrl: c.streamUrl,
-        streamType: Value(c.streamType.name),
-        sortOrder: Value(i),
-      );
-    });
-    await _db.upsertChannels(companions);
+    // Save channels to database in chunks to prevent heap explosion on TV
+    const batchSize = 3000;
+    final total = channels.length;
+    for (var i = 0; i < total; i += batchSize) {
+      final end = (i + batchSize < total) ? i + batchSize : total;
+      final slice = channels.sublist(i, end);
+      final companions = List<db.ChannelsCompanion>.generate(slice.length, (idx) {
+        final c = slice[idx];
+        return db.ChannelsCompanion.insert(
+          id: c.id,
+          providerId: c.providerId,
+          name: c.name,
+          tvgId: Value(c.tvgId),
+          tvgName: Value(c.tvgName),
+          tvgLogo: Value(c.tvgLogo),
+          groupTitle: Value(c.groupTitle),
+          channelNumber: Value(c.channelNumber),
+          streamUrl: c.streamUrl,
+          streamType: Value(c.streamType.name),
+          sortOrder: Value(i + idx),
+        );
+      });
+      await _db.upsertChannels(companions);
+      await Future<void>.delayed(const Duration(milliseconds: 5));
+    }
 
-    // Resolve missing logos in background (live channels only)
-    final liveOnly = channels.where((c) => c.streamType == StreamType.live).toList();
+    // Resolve missing logos in background (capped to 250 to keep TV smooth)
+    final liveOnly = channels.where((c) => c.streamType == StreamType.live).take(250).toList();
     if (liveOnly.isNotEmpty) {
       _resolveChannelLogos(liveOnly).catchError((_) {});
     }
@@ -399,7 +414,13 @@ class ProviderManager {
         debugPrint('[Xtream] Failed to fetch series streams: $e');
       }
 
-      final total = [...lives, ...vods, ...series];
+      // In-place append rather than creating huge 300k-item duplicate list in heap
+      final total = lives;
+      total.addAll(vods);
+      vods = const [];
+      total.addAll(series);
+      series = const [];
+
       if (total.isEmpty) {
         if (liveErr != null) {
           throw XtreamServerException('Failed to download streams: $liveErr');
@@ -421,6 +442,11 @@ class ProviderManager {
     }
   }
 
+  static final _prefixRe1 = RegExp(r'^[a-z]{2}[-]?[a-z]?\|\s*');
+  static final _prefixRe2 = RegExp(r'^[a-z]{2}:\s+');
+  static final _prefixRe3 = RegExp(r'^\[?[a-z]{2}\]?\s+');
+  static final _prefixRe4 = RegExp(r'^[a-z]{2}\s+');
+
   /// Resolve missing logos in background after provider refresh.
   Future<void> _resolveChannelLogos(List<Channel> channels) async {
     await resolveLogosForChannels(channels);
@@ -429,8 +455,10 @@ class ProviderManager {
   /// Resolve missing logos for a set of channels.
   /// Public so it can be called at startup for existing DB channels.
   Future<void> resolveLogosForChannels(List<Channel> channels) async {
+    // Only resolve the first 250 missing logos to avoid thrashing CPU/memory on TV devices
     final needsLogo = channels
         .where((c) => c.tvgLogo == null || c.tvgLogo!.isEmpty)
+        .take(250)
         .map((c) => (id: c.id, name: c.name, tvgLogo: c.tvgLogo))
         .toList();
 
@@ -450,12 +478,13 @@ class ProviderManager {
         }
       }
       for (final ch in needsLogo.toList()) {
-        final stripped = ch.name.toLowerCase()
-            .replaceAll(RegExp(r'^[a-z]{2}[-]?[a-z]?\|\s*'), '')
-            .replaceAll(RegExp(r'^[a-z]{2}:\s+'), '')
-            .replaceAll(RegExp(r'^\[?[a-z]{2}\]?\s+'), '')
-            .replaceAll(RegExp(r'^[a-z]{2}\s+'), '');
-        final icon = epgIconMap[ch.name.toLowerCase()] ?? epgIconMap[stripped];
+        final lower = ch.name.toLowerCase();
+        final stripped = lower
+            .replaceAll(_prefixRe1, '')
+            .replaceAll(_prefixRe2, '')
+            .replaceAll(_prefixRe3, '')
+            .replaceAll(_prefixRe4, '');
+        final icon = epgIconMap[lower] ?? epgIconMap[stripped];
         if (icon != null) {
           resolved[ch.id] = icon;
           needsLogo.removeWhere((c) => c.id == ch.id);

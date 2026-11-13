@@ -83,8 +83,23 @@ class _YesShellState extends ConsumerState<YesShell> {
           return Row(
             children: [
               // ── 1. Left: Brand Logo & Name ──
-              Focus(
-                canRequestFocus: false,
+              FocusableActionDetector(
+                actions: {
+                  ActivateIntent: CallbackAction<ActivateIntent>(onInvoke: (_) {
+                    try {
+                      ref.read(playerServiceProvider).stop();
+                    } catch (_) {}
+                    context.go('/home');
+                    return null;
+                  }),
+                  ButtonActivateIntent: CallbackAction<ButtonActivateIntent>(onInvoke: (_) {
+                    try {
+                      ref.read(playerServiceProvider).stop();
+                    } catch (_) {}
+                    context.go('/home');
+                    return null;
+                  }),
+                },
                 child: Builder(
                   builder: (logoCtx) {
                     final hasFocus = Focus.of(logoCtx).hasFocus;
@@ -102,7 +117,7 @@ class _YesShellState extends ConsumerState<YesShell> {
                           borderRadius: BorderRadius.circular(8),
                           border: Border.all(
                             color: hasFocus ? Colors.white : Colors.transparent,
-                            width: hasFocus ? 2.0 : 1.0,
+                            width: hasFocus ? 2.5 : 1.0,
                           ),
                         ),
                         child: Row(
@@ -177,8 +192,23 @@ class _YesShellState extends ConsumerState<YesShell> {
               // ── 3. Desktop Search & Timer (Hidden on mobile/compact) ──
               if (!isCompact) ...[
                 const SizedBox(width: 14),
-                Focus(
-                  canRequestFocus: false,
+                FocusableActionDetector(
+                  actions: {
+                    ActivateIntent: CallbackAction<ActivateIntent>(onInvoke: (_) {
+                      try {
+                        ref.read(playerServiceProvider).stop();
+                      } catch (_) {}
+                      context.go('/search');
+                      return null;
+                    }),
+                    ButtonActivateIntent: CallbackAction<ButtonActivateIntent>(onInvoke: (_) {
+                      try {
+                        ref.read(playerServiceProvider).stop();
+                      } catch (_) {}
+                      context.go('/search');
+                      return null;
+                    }),
+                  },
                   child: Builder(
                     builder: (searchCtx) {
                       final hasFocus = Focus.of(searchCtx).hasFocus;
@@ -199,7 +229,7 @@ class _YesShellState extends ConsumerState<YesShell> {
                             borderRadius: BorderRadius.circular(20),
                             border: Border.all(
                               color: hasFocus ? Colors.white : const Color(0xFF2A2840),
-                              width: hasFocus ? 2.0 : 1.0,
+                              width: hasFocus ? 2.5 : 1.0,
                             ),
                           ),
                           child: const Row(
@@ -237,33 +267,48 @@ class _YesShellState extends ConsumerState<YesShell> {
     required bool isSelected,
     double fontSize = 14,
   }) {
-    return Focus(
-      canRequestFocus: false,
+    void handleTap() {
+      if (!isSelected) {
+        if (route != '/live') {
+          try {
+            ref.read(playerServiceProvider).stop();
+          } catch (_) {}
+        }
+        context.go(route);
+      }
+    }
+
+    return FocusableActionDetector(
+      actions: {
+        ActivateIntent: CallbackAction<ActivateIntent>(onInvoke: (_) {
+          handleTap();
+          return null;
+        }),
+        ButtonActivateIntent: CallbackAction<ButtonActivateIntent>(onInvoke: (_) {
+          handleTap();
+          return null;
+        }),
+      },
       child: Builder(
         builder: (ctx) {
           final hasFocus = Focus.of(ctx).hasFocus;
           return InkWell(
-            onTap: () {
-              if (!isSelected) {
-                if (route != '/live') {
-                  try {
-                    ref.read(playerServiceProvider).stop();
-                  } catch (_) {}
-                }
-                context.go(route);
-              }
-            },
-            borderRadius: BorderRadius.circular(6),
+            onTap: handleTap,
+            borderRadius: BorderRadius.circular(8),
             child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
               decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(6),
+                borderRadius: BorderRadius.circular(8),
                 color: hasFocus
-                    ? const Color(0xFF6C5CE7).withValues(alpha: 0.28)
-                    : Colors.transparent,
+                    ? const Color(0xFF6C5CE7).withValues(alpha: 0.45)
+                    : (isSelected
+                        ? const Color(0xFF6C5CE7).withValues(alpha: 0.20)
+                        : Colors.transparent),
                 border: Border.all(
-                  color: hasFocus ? Colors.white : Colors.transparent,
-                  width: hasFocus ? 2.0 : 1.5,
+                  color: hasFocus
+                      ? Colors.white
+                      : (isSelected ? const Color(0xFF6C5CE7) : Colors.transparent),
+                  width: hasFocus ? 2.5 : 1.2,
                 ),
               ),
               child: Text(
@@ -273,15 +318,7 @@ class _YesShellState extends ConsumerState<YesShell> {
                       ? const Color(0xFFFFD32A)
                       : (hasFocus ? Colors.white : Colors.white70),
                   fontSize: fontSize,
-                  fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
-                  shadows: (!PlatformInfo.isTV && isSelected)
-                      ? [
-                          Shadow(
-                            color: const Color(0xFFFFD32A).withValues(alpha: 0.5),
-                            blurRadius: 10,
-                          ),
-                        ]
-                      : null,
+                  fontWeight: isSelected ? FontWeight.bold : FontWeight.w600,
                 ),
               ),
             ),

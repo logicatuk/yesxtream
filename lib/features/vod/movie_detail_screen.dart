@@ -399,7 +399,13 @@ class _MovieDetailScreenState extends ConsumerState<MovieDetailScreen> {
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                   child: IconButton(
                     icon: const Icon(Icons.arrow_back, color: Colors.white),
-                    onPressed: () => Navigator.of(context).pop(),
+                    onPressed: () {
+                      if (context.canPop()) {
+                        context.pop();
+                      } else {
+                        context.go('/movies');
+                      }
+                    },
                   ),
                 ),
                 Expanded(
@@ -544,10 +550,15 @@ class _MovieDetailScreenState extends ConsumerState<MovieDetailScreen> {
                               OutlinedButton.icon(
                                 onPressed: () => _launchTrailer(trailerKey),
                                 style: OutlinedButton.styleFrom(
-                                  side: const BorderSide(color: Color(0xFFE74C3C)),
                                   padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
                                   shape: RoundedRectangleBorder(
                                     borderRadius: BorderRadius.circular(10),
+                                  ),
+                                ).copyWith(
+                                  side: WidgetStateProperty.resolveWith(
+                                    (states) => states.contains(WidgetState.focused)
+                                        ? const BorderSide(color: Colors.white, width: 2.5)
+                                        : const BorderSide(color: Color(0xFFE74C3C)),
                                   ),
                                 ),
                                 icon: const Icon(Icons.play_circle_outline_rounded, color: Color(0xFFE74C3C), size: 20),
@@ -559,17 +570,22 @@ class _MovieDetailScreenState extends ConsumerState<MovieDetailScreen> {
                             OutlinedButton.icon(
                               onPressed: _toggleFavorite,
                               style: OutlinedButton.styleFrom(
-                                side: BorderSide(
-                                  color: _isFavorite
-                                      ? const Color(0xFFFFD32A).withValues(alpha: 0.8)
-                                      : const Color(0xFF2E2C42),
-                                ),
                                 backgroundColor: _isFavorite
                                     ? const Color(0xFFFFD32A).withValues(alpha: 0.12)
                                     : Colors.transparent,
                                 padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
                                 shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(10),
+                                ),
+                              ).copyWith(
+                                side: WidgetStateProperty.resolveWith(
+                                  (states) => states.contains(WidgetState.focused)
+                                      ? const BorderSide(color: Colors.white, width: 2.5)
+                                      : BorderSide(
+                                          color: _isFavorite
+                                              ? const Color(0xFFFFD32A).withValues(alpha: 0.8)
+                                              : const Color(0xFF2E2C42),
+                                        ),
                                 ),
                               ),
                               icon: Icon(

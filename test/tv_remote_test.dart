@@ -111,4 +111,32 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Home Page'), findsOneWidget);
   });
+
+  testWidgets('TvBackHandler on Movie detail navigates to /movies on back key',
+      (WidgetTester tester) async {
+    final testRouter = GoRouter(
+      initialLocation: '/movie-detail',
+      routes: [
+        GoRoute(
+          path: '/movies',
+          builder: (_, __) => const Scaffold(body: Text('Movies Grid')),
+        ),
+        GoRoute(
+          path: '/movie-detail',
+          builder: (_, __) => const TvBackHandler(
+            fallbackRoute: '/movies',
+            child: Scaffold(body: Text('Movie Details')),
+          ),
+        ),
+      ],
+    );
+
+    await tester.pumpWidget(MaterialApp.router(routerConfig: testRouter));
+    await tester.pumpAndSettle();
+    expect(find.text('Movie Details'), findsOneWidget);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    expect(find.text('Movies Grid'), findsOneWidget);
+  });
 }

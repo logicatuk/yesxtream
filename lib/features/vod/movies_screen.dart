@@ -298,8 +298,17 @@ class _MoviesScreenState extends ConsumerState<MoviesScreen> {
                       child: Row(
                         children: [
                           Expanded(
-                            child: Focus(
-                              canRequestFocus: false,
+                            child: FocusableActionDetector(
+                              actions: {
+                                ActivateIntent: CallbackAction<ActivateIntent>(onInvoke: (_) {
+                                  context.go('/home');
+                                  return null;
+                                }),
+                                ButtonActivateIntent: CallbackAction<ButtonActivateIntent>(onInvoke: (_) {
+                                  context.go('/home');
+                                  return null;
+                                }),
+                              },
                               child: Builder(
                                 builder: (btnCtx) {
                                   final hasFocus = Focus.of(btnCtx).hasFocus;
@@ -315,7 +324,7 @@ class _MoviesScreenState extends ConsumerState<MoviesScreen> {
                                         borderRadius: BorderRadius.circular(6),
                                         border: Border.all(
                                           color: hasFocus ? Colors.white : const Color(0xFF2A2840),
-                                          width: hasFocus ? 2.0 : 1.0,
+                                          width: hasFocus ? 2.5 : 1.0,
                                         ),
                                       ),
                                       child: const Row(
@@ -334,8 +343,17 @@ class _MoviesScreenState extends ConsumerState<MoviesScreen> {
                           ),
                           const SizedBox(width: 8),
                           Expanded(
-                            child: Focus(
-                              canRequestFocus: false,
+                            child: FocusableActionDetector(
+                              actions: {
+                                ActivateIntent: CallbackAction<ActivateIntent>(onInvoke: (_) {
+                                  context.go('/search');
+                                  return null;
+                                }),
+                                ButtonActivateIntent: CallbackAction<ButtonActivateIntent>(onInvoke: (_) {
+                                  context.go('/search');
+                                  return null;
+                                }),
+                              },
                               child: Builder(
                                 builder: (btnCtx) {
                                   final hasFocus = Focus.of(btnCtx).hasFocus;
@@ -351,7 +369,7 @@ class _MoviesScreenState extends ConsumerState<MoviesScreen> {
                                         borderRadius: BorderRadius.circular(6),
                                         border: Border.all(
                                           color: hasFocus ? Colors.white : const Color(0xFF2A2840),
-                                          width: hasFocus ? 2.0 : 1.0,
+                                          width: hasFocus ? 2.5 : 1.0,
                                         ),
                                       ),
                                       child: const Row(
@@ -733,8 +751,17 @@ class _MoviesScreenState extends ConsumerState<MoviesScreen> {
     required bool isSelected,
     required VoidCallback onTap,
   }) {
-    return Focus(
-      canRequestFocus: false,
+    return FocusableActionDetector(
+      actions: {
+        ActivateIntent: CallbackAction<ActivateIntent>(onInvoke: (_) {
+          onTap();
+          return null;
+        }),
+        ButtonActivateIntent: CallbackAction<ButtonActivateIntent>(onInvoke: (_) {
+          onTap();
+          return null;
+        }),
+      },
       child: Builder(
         builder: (itemCtx) {
           final hasFocus = Focus.of(itemCtx).hasFocus;
@@ -751,7 +778,7 @@ class _MoviesScreenState extends ConsumerState<MoviesScreen> {
                         ? const Color(0xFF6C5CE7).withValues(alpha: 0.22)
                         : Colors.transparent,
                 border: hasFocus
-                    ? Border.all(color: Colors.white, width: 2.0)
+                    ? Border.all(color: Colors.white, width: 2.5)
                     : Border(
                         bottom: const BorderSide(color: Color(0xFF1E1D2F), width: 1),
                         left: isSelected
@@ -995,8 +1022,17 @@ class _MovieCardState extends ConsumerState<_MovieCard> {
         history.progressFraction < 0.90;
 
     return RepaintBoundary(
-      child: Focus(
-        canRequestFocus: false,
+      child: FocusableActionDetector(
+        actions: {
+          ActivateIntent: CallbackAction<ActivateIntent>(onInvoke: (_) {
+            context.push('/movies/detail', extra: movie);
+            return null;
+          }),
+          ButtonActivateIntent: CallbackAction<ButtonActivateIntent>(onInvoke: (_) {
+            context.push('/movies/detail', extra: movie);
+            return null;
+          }),
+        },
         child: Builder(
           builder: (context) {
             final hasFocus = Focus.of(context).hasFocus;
@@ -1019,7 +1055,7 @@ class _MovieCardState extends ConsumerState<_MovieCard> {
                       color: hasFocus
                           ? Colors.white
                           : (_isHovered ? accent : const Color(0xFF26243A)),
-                      width: hasFocus ? (isTV ? 3.0 : 2.5) : (_isHovered ? 1.5 : 1),
+                      width: hasFocus ? (isTV ? 3.2 : 2.5) : (_isHovered ? 1.5 : 1),
                     ),
                     boxShadow: (!isTV && (hasFocus || _isHovered))
                         ? [

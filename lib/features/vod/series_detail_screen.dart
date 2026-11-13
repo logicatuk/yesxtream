@@ -491,7 +491,13 @@ class _SeriesDetailScreenState extends ConsumerState<SeriesDetailScreen> {
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                   child: IconButton(
                     icon: const Icon(Icons.arrow_back, color: Colors.white),
-                    onPressed: () => Navigator.of(context).pop(),
+                    onPressed: () {
+                      if (context.canPop()) {
+                        context.pop();
+                      } else {
+                        context.go('/series');
+                      }
+                    },
                   ),
                 ),
                 Expanded(
@@ -507,36 +513,57 @@ class _SeriesDetailScreenState extends ConsumerState<SeriesDetailScreen> {
                             posterUrl ??
                             (widget.series.tvgLogo != null && widget.series.tvgLogo!.isNotEmpty ? widget.series.tvgLogo : null);
 
-                        return InkWell(
-                          onTap: () {
-                            setState(() => _selectedEpisode = ep);
-                            _playEpisode(ep);
+                        return FocusableActionDetector(
+                          actions: {
+                            ActivateIntent: CallbackAction<ActivateIntent>(onInvoke: (_) {
+                              setState(() => _selectedEpisode = ep);
+                              _playEpisode(ep);
+                              return null;
+                            }),
+                            ButtonActivateIntent: CallbackAction<ButtonActivateIntent>(onInvoke: (_) {
+                              setState(() => _selectedEpisode = ep);
+                              _playEpisode(ep);
+                              return null;
+                            }),
                           },
-                          borderRadius: BorderRadius.circular(12),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                            decoration: BoxDecoration(
-                              color: isSelected
-                                  ? const Color(0xFF6C5CE7).withValues(alpha: 0.15)
-                                  : const Color(0xFF141322),
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(
-                                color: isSelected
-                                    ? const Color(0xFF6C5CE7)
-                                    : const Color(0xFF22203A),
-                              ),
-                            ),
-                            child: Row(
-                              children: [
-                                // Thumbnail with fallback
-                                Container(
-                                  width: 86,
-                                  height: 54,
+                          child: Builder(
+                            builder: (epCtx) {
+                              final hasFocus = Focus.of(epCtx).hasFocus;
+                              return InkWell(
+                                onTap: () {
+                                  setState(() => _selectedEpisode = ep);
+                                  _playEpisode(ep);
+                                },
+                                borderRadius: BorderRadius.circular(12),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                                   decoration: BoxDecoration(
-                                    borderRadius: BorderRadius.circular(8),
-                                    color: const Color(0xFF1E1E2E),
+                                    color: hasFocus
+                                        ? const Color(0xFF6C5CE7).withValues(alpha: 0.35)
+                                        : (isSelected
+                                            ? const Color(0xFF6C5CE7).withValues(alpha: 0.15)
+                                            : const Color(0xFF141322)),
+                                    borderRadius: BorderRadius.circular(12),
+                                    border: Border.all(
+                                      color: hasFocus
+                                          ? Colors.white
+                                          : (isSelected
+                                              ? const Color(0xFF6C5CE7)
+                                              : const Color(0xFF22203A)),
+                                      width: hasFocus ? 2.5 : 1.0,
+                                    ),
                                   ),
-                                  clipBehavior: Clip.antiAlias,
+                                  child: Row(
+                                    children: [
+                                      // Thumbnail with fallback
+                                      Container(
+                                        width: 86,
+                                        height: 54,
+                                        decoration: BoxDecoration(
+                                          borderRadius: BorderRadius.circular(8),
+                                          color: const Color(0xFF1E1E2E),
+                                        ),
+                                        clipBehavior: Clip.antiAlias,
                                   child: thumbUrl != null && thumbUrl.isNotEmpty
                                       ? Stack(
                                           fit: StackFit.expand,
@@ -603,7 +630,10 @@ class _SeriesDetailScreenState extends ConsumerState<SeriesDetailScreen> {
                             ),
                           ),
                         );
-                      }
+                      },
+                    ),
+                  );
+                }
 
                       Widget buildSeasonSelector() {
                         return Padding(
@@ -957,6 +987,7 @@ class _SeriesDetailScreenState extends ConsumerState<SeriesDetailScreen> {
                                           Row(
                                             children: [
                                               FilledButton.icon(
+                                                autofocus: true,
                                                 onPressed: () {
                                                   if (_seasonDetail != null && _seasonDetail!.episodes.isNotEmpty) {
                                                     _playEpisode(_seasonDetail!.episodes.first);
@@ -967,19 +998,65 @@ class _SeriesDetailScreenState extends ConsumerState<SeriesDetailScreen> {
                                                   padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                                                   minimumSize: Size.zero,
                                                   tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                                ).copyWith(
+                                                  side: WidgetStateProperty.resolveWith(
+                                                    (states) => states.contains(WidgetState.focused)
+                                                        ? const BorderSide(color: Colors.white, width: 2.5)
+                                                        : null,
+                                                  ),
                                                 ),
                                                 icon: const Icon(Icons.play_arrow_rounded, size: 16),
                                                 label: Text(settings.tr('play_episode'), style: const TextStyle(fontSize: 12)),
                                               ),
+                                              if (trailerKey != null && trailerKey.isNotEmpty) ...[
+                                                const SizedBox(width: 8),
+                                                OutlinedButton.icon(
+                                                  onPressed: () => _launchTrailer(trailerKey),
+                                                  style: OutlinedButton.styleFrom(
+                                                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                                    minimumSize: Size.zero,
+                                                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                                  ).copyWith(
+                                                    side: WidgetStateProperty.resolveWith(
+                                                      (states) => states.contains(WidgetState.focused)
+                                                          ? const BorderSide(color: Colors.white, width: 2.5)
+                                                          : const BorderSide(color: Color(0xFFE74C3C)),
+                                                    ),
+                                                  ),
+                                                  icon: const Icon(Icons.play_circle_outline_rounded, color: Color(0xFFE74C3C), size: 16),
+                                                  label: Text(settings.tr('trailer'), style: const TextStyle(color: Colors.white, fontSize: 12)),
+                                                ),
+                                              ],
                                               const SizedBox(width: 8),
-                                              IconButton(
-                                                tooltip: _isFavorite ? settings.tr('remove_favorites') : settings.tr('add_favorites'),
+                                              OutlinedButton.icon(
+                                                onPressed: _toggleFavorite,
+                                                style: OutlinedButton.styleFrom(
+                                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                                  minimumSize: Size.zero,
+                                                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                                ).copyWith(
+                                                  side: WidgetStateProperty.resolveWith(
+                                                    (states) => states.contains(WidgetState.focused)
+                                                        ? const BorderSide(color: Colors.white, width: 2.5)
+                                                        : BorderSide(
+                                                            color: _isFavorite
+                                                                ? const Color(0xFFFFD32A).withValues(alpha: 0.8)
+                                                                : const Color(0xFF2E2C42),
+                                                          ),
+                                                  ),
+                                                ),
                                                 icon: Icon(
                                                   _isFavorite ? Icons.star_rounded : Icons.star_border_rounded,
-                                                  color: _isFavorite ? const Color(0xFFFFD32A) : Colors.white,
-                                                  size: 22,
+                                                  color: _isFavorite ? const Color(0xFFFFD32A) : Colors.white70,
+                                                  size: 16,
                                                 ),
-                                                onPressed: _toggleFavorite,
+                                                label: Text(
+                                                  _isFavorite ? 'Favorited' : 'Favorite',
+                                                  style: TextStyle(
+                                                    color: _isFavorite ? const Color(0xFFFFD32A) : Colors.white,
+                                                    fontSize: 12,
+                                                  ),
+                                                ),
                                               ),
                                             ],
                                           ),
