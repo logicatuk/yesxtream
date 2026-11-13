@@ -43,7 +43,7 @@ class AppSettings {
     this.streamFormat = 'ts',
     this.epgTimeShiftHours = 0,
     this.hardwareAcceleration = true,
-    this.autoRefreshOnStartup = true,
+    this.autoRefreshOnStartup = false,
     this.defaultAspectRatio = 'Fit (Auto)',
     this.bufferMode = 'standard',
   });
@@ -174,7 +174,7 @@ class AppSettingsNotifier extends StateNotifier<AppSettings> {
       streamFormat: prefs.getString(_kStreamFormat) ?? (kIsWeb ? 'm3u8' : 'ts'),
       epgTimeShiftHours: prefs.getInt(_kEpgTimeShift) ?? 0,
       hardwareAcceleration: prefs.getBool(_kHwAcc) ?? true,
-      autoRefreshOnStartup: prefs.getBool(_kAutoRefreshStartup) ?? true,
+      autoRefreshOnStartup: prefs.getBool(_kAutoRefreshStartup) ?? false,
       defaultAspectRatio: prefs.getString(_kAspectRatio) ?? 'Fit (Auto)',
       bufferMode: prefs.getString(_kBufferMode) ?? 'standard',
     );

@@ -5,7 +5,6 @@ import 'package:drift/drift.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:uuid/uuid.dart';
 
 import '../datasources/local/database.dart' as db;
 import '../datasources/parsers/xmltv_parser.dart';
@@ -25,7 +24,6 @@ class _ParseArgs {
 
 class EpgRefreshService {
   final db.AppDatabase _db;
-  final _uuid = const Uuid();
   bool _isRefreshing = false;
 
   EpgRefreshService(this._db);
@@ -131,43 +129,31 @@ class EpgRefreshService {
     }
   }
 
-  /// Add default free EPG sources if none exist.
-  Future<void> addDefaultSources() async {
+  /// Legacy cleanup: remove any previously seeded third-party EPG sources (EPG comes from provider).
+  Future<void> cleanupLegacyDefaultSources() async {
     final existing = await _db.getAllEpgSources();
-    if (existing.isNotEmpty) return;
-    await _insertDefaults();
+    for (final s in existing) {
+      final u = s.url.toLowerCase();
+      final n = s.name.toLowerCase();
+      if (u.contains('epg.best') ||
+          u.contains('usa-locals') ||
+          n.contains('epg.best') ||
+          n.contains('usa locals')) {
+        await _db.deleteEpgSource(s.id);
+      }
+    }
   }
 
-  /// Delete all existing sources and re-add defaults.
+  /// Kept for API compatibility; cleans up legacy third-party feeds without seeding external ones.
+  Future<void> addDefaultSources() async {
+    await cleanupLegacyDefaultSources();
+  }
+
+  /// Delete all existing sources.
   Future<void> resetToDefaultSources() async {
     final existing = await _db.getAllEpgSources();
     for (final s in existing) {
       await _db.deleteEpgSource(s.id);
-    }
-    await _insertDefaults();
-  }
-
-  Future<void> _insertDefaults() async {
-    final defaults = [
-      (
-        name: 'EPG.best',
-        url: 'http://epg.best/16b5b-ypkixv.xml.gz',
-        enabled: true,
-      ),
-      (
-        name: 'USA Locals (ABC, CBS, Fox, NBC)',
-        url: 'https://raw.githubusercontent.com/usa-local-epg/usa-locals/main/usalocals.xml.gz',
-        enabled: true,
-      ),
-    ];
-
-    for (final d in defaults) {
-      await _db.upsertEpgSource(db.EpgSourcesCompanion.insert(
-        id: _uuid.v4(),
-        name: d.name,
-        url: d.url,
-        enabled: Value(d.enabled),
-      ));
     }
   }
 }

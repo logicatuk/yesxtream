@@ -58,22 +58,6 @@ class _AddEpgSourceDialogState extends ConsumerState<AddEpgSourceDialog> {
     }
   }
 
-  Future<void> _addDefaults() async {
-    setState(() => _loading = true);
-    try {
-      final service = ref.read(epgRefreshServiceProvider);
-      // Force add defaults even if sources exist
-      final database = ref.read(databaseProvider);
-      final existing = await database.getAllEpgSources();
-      if (existing.isEmpty) {
-        await service.addDefaultSources();
-      }
-      if (mounted) Navigator.of(context).pop(true);
-    } finally {
-      if (mounted) setState(() => _loading = false);
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
@@ -88,7 +72,7 @@ class _AddEpgSourceDialogState extends ConsumerState<AddEpgSourceDialog> {
                 controller: _nameController,
                 decoration: const InputDecoration(
                   labelText: 'Name',
-                  hintText: 'e.g. IPTV-Org EPG',
+                  hintText: 'e.g. Custom EPG',
                 ),
                 validator: (v) =>
                     (v == null || v.trim().isEmpty) ? 'Required' : null,
@@ -107,12 +91,6 @@ class _AddEpgSourceDialogState extends ConsumerState<AddEpgSourceDialog> {
                   }
                   return null;
                 },
-              ),
-              const SizedBox(height: 16),
-              OutlinedButton.icon(
-                onPressed: _loading ? null : _addDefaults,
-                icon: const Icon(Icons.auto_fix_high),
-                label: const Text('Add Default Sources'),
               ),
             ],
           ),

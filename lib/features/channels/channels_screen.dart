@@ -622,16 +622,10 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
     _startTopBarFade();
   }
 
-  /// Add default EPG sources on first run and kick off a background refresh.
+  /// Ensure legacy default third-party sources are cleaned up (EPG comes from provider).
   Future<void> _ensureEpgSources() async {
     final epgService = ref.read(epgRefreshServiceProvider);
-    await epgService.addDefaultSources();
-    // Refresh in background — don't block the UI
-    epgService.refreshAllSources().then((_) {
-      debugPrint('[EPG] Background refresh complete');
-    }).catchError((e) {
-      debugPrint('[EPG] Background refresh failed: $e');
-    });
+    await epgService.cleanupLegacyDefaultSources();
   }
 
   @override

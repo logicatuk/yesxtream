@@ -1,17 +1,14 @@
-import 'dart:io';
-
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/countdown_snackbar.dart';
 import '../../data/datasources/local/database.dart' as db;
 import '../../data/services/app_settings.dart';
 import '../../data/services/app_update_service.dart';
-import '../../data/services/backup_service.dart';
+import '../../data/services/device_identity_service.dart';
 import '../../data/services/epg_refresh_service.dart';
 import '../../data/services/playback_history_service.dart';
 import '../player/player_service.dart';
@@ -756,32 +753,76 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   // 6. Device / License Settings
   // ──────────────────────────────
   Widget _buildDeviceLicenseSettings() {
+    final identityAsync = ref.watch(deviceIdentityProvider);
+    final macAddress = identityAsync.value?.macAddress ?? 'Loading…';
+    final deviceKey = identityAsync.value?.deviceKey ?? '••••••';
+
     return ListView(
       padding: const EdgeInsets.all(24),
       children: [
         _SectionHeader(title: 'Device & License', subtitle: 'Hardware identification and active player license'),
         _SettingsCard(
           children: [
-            // Device ID
-            const ListTile(
-              leading: Icon(Icons.fingerprint_rounded, color: Colors.white70),
-              title: Text('Device ID', style: TextStyle(color: Colors.white)),
-              subtitle: Text('YES-XTRM-9832-MAC', style: TextStyle(color: Colors.white70, fontFamily: 'monospace')),
+            // Device ID (Virtual MAC)
+            ListTile(
+              leading: const Icon(Icons.fingerprint_rounded, color: Colors.white70),
+              title: const Text('Device ID / MAC', style: TextStyle(color: Colors.white)),
+              subtitle: Text(
+                macAddress,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontFamily: 'monospace',
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 1.2,
+                ),
+              ),
+              trailing: IconButton(
+                icon: const Icon(Icons.copy_rounded, color: Colors.white54, size: 20),
+                tooltip: 'Copy MAC',
+                onPressed: () {
+                  Clipboard.setData(ClipboardData(text: macAddress));
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('MAC copied: $macAddress')),
+                  );
+                },
+              ),
             ),
             const Divider(color: Color(0xFF26243A), height: 1),
 
-            // Revealable Key
+            // Revealable 6-digit Device Key
             ListTile(
               leading: const Icon(Icons.vpn_key_rounded, color: Colors.white70),
               title: const Text('Device Key', style: TextStyle(color: Colors.white)),
               subtitle: Text(
-                _keyRevealed ? 'XK89-2911-YESX-7742' : '••••••••••••••••',
-                style: const TextStyle(color: Colors.white70, fontFamily: 'monospace'),
+                _keyRevealed ? deviceKey : '••••••',
+                style: const TextStyle(
+                  color: Colors.white70,
+                  fontFamily: 'monospace',
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 3.0,
+                ),
               ),
-              trailing: IconButton(
-                icon: Icon(_keyRevealed ? Icons.visibility_off_rounded : Icons.visibility_rounded,
-                    color: Colors.white54),
-                onPressed: () => setState(() => _keyRevealed = !_keyRevealed),
+              trailing: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  IconButton(
+                    icon: Icon(_keyRevealed ? Icons.visibility_off_rounded : Icons.visibility_rounded,
+                        color: Colors.white54),
+                    onPressed: () => setState(() => _keyRevealed = !_keyRevealed),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.copy_rounded, color: Colors.white54, size: 20),
+                    tooltip: 'Copy Key',
+                    onPressed: () {
+                      Clipboard.setData(ClipboardData(text: deviceKey));
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Device key copied')),
+                      );
+                    },
+                  ),
+                ],
               ),
             ),
             const Divider(color: Color(0xFF26243A), height: 1),
@@ -897,7 +938,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     return ListView(
       padding: const EdgeInsets.all(24),
       children: [
-        _SectionHeader(title: 'Help & About', subtitle: 'Support, backups, remote controls, and documentation'),
+        _SectionHeader(title: 'Help & About', subtitle: 'Support, remote controls, and documentation'),
         _SettingsCard(
           children: [
             ListTile(
@@ -906,24 +947,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
               subtitle: Text('v${AppUpdateService.currentVersion} • High Performance IPTV & VOD Engine',
                   style: const TextStyle(color: Colors.white54)),
-            ),
-            const Divider(color: Color(0xFF26243A), height: 1),
-            ListTile(
-              leading: const Icon(Icons.upload_rounded, color: Colors.white70),
-              title: const Text('Export Backup', style: TextStyle(color: Colors.white)),
-              subtitle: const Text('Save playlists, EPG sources, and favorites to file',
-                  style: TextStyle(color: Colors.white54, fontSize: 12)),
-              trailing: const Icon(Icons.chevron_right_rounded, color: Colors.white54),
-              onTap: () => _exportBackup(context),
-            ),
-            const Divider(color: Color(0xFF26243A), height: 1),
-            ListTile(
-              leading: const Icon(Icons.download_rounded, color: Colors.white70),
-              title: const Text('Import Backup', style: TextStyle(color: Colors.white)),
-              subtitle: const Text('Restore playlists and configuration from a backup file',
-                  style: TextStyle(color: Colors.white54, fontSize: 12)),
-              trailing: const Icon(Icons.chevron_right_rounded, color: Colors.white54),
-              onTap: () => _importBackup(context),
             ),
             const Divider(color: Color(0xFF26243A), height: 1),
             ListTile(
@@ -1019,130 +1042,6 @@ class _SettingsCard extends StatelessWidget {
 // ──────────────────────────────────────────
 // Preserved Helper Tiles & Screens
 // ──────────────────────────────────────────
-
-Future<void> _exportBackup(BuildContext context) async {
-  try {
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => const Center(child: CircularProgressIndicator()),
-    );
-    final path = await BackupService.exportBackup();
-    if (context.mounted) Navigator.of(context).pop();
-    if (context.mounted) {
-      final action = await showDialog<String>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          backgroundColor: const Color(0xFF1A192A),
-          title: const Text('Backup Created'),
-          content: Text('Saved to:\n$path'),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, 'close'),
-              child: const Text('Done'),
-            ),
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, 'save'),
-              child: const Text('Save As…'),
-            ),
-            FilledButton.icon(
-              onPressed: () => Navigator.pop(ctx, 'share'),
-              icon: const Icon(Icons.share_rounded, size: 18),
-              label: const Text('Share'),
-            ),
-          ],
-        ),
-      );
-      if (action == 'share') {
-        await SharePlus.instance.share(ShareParams(files: [XFile(path)]));
-      } else if (action == 'save') {
-        final savePath = await FilePicker.platform.saveFile(
-          dialogTitle: 'Save Backup',
-          fileName: path.split('/').last,
-          type: FileType.any,
-        );
-        if (savePath != null) {
-          await File(path).copy(savePath);
-          if (context.mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text('Saved to $savePath')),
-            );
-          }
-        }
-      }
-    }
-  } catch (e) {
-    if (context.mounted) {
-      try {
-        Navigator.of(context).pop();
-      } catch (_) {}
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Backup failed: $e'), backgroundColor: Colors.red),
-      );
-    }
-  }
-}
-
-Future<void> _importBackup(BuildContext context) async {
-  try {
-    final result = await FilePicker.platform.pickFiles(type: FileType.any);
-    if (result == null || result.files.isEmpty) return;
-    final filePath = result.files.single.path;
-    if (filePath == null) return;
-
-    if (!context.mounted) return;
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF1A192A),
-        title: const Text('Restore Backup?'),
-        content: const Text(
-          'This will replace all current data with the backup.\n\n'
-          'The app will need to restart after restoring.',
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            style: FilledButton.styleFrom(backgroundColor: Colors.amber),
-            child: const Text('Restore'),
-          ),
-        ],
-      ),
-    );
-    if (confirmed != true || !context.mounted) return;
-
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => const Center(child: CircularProgressIndicator()),
-    );
-    final summary = await BackupService.importBackup(filePath);
-    if (context.mounted) Navigator.of(context).pop();
-    if (context.mounted) {
-      await showDialog(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          backgroundColor: const Color(0xFF1A192A),
-          title: const Text('Backup Restored'),
-          content: Text('$summary\n\nPlease restart the app for changes to take effect.'),
-          actions: [
-            FilledButton(onPressed: () => Navigator.pop(ctx), child: const Text('OK')),
-          ],
-        ),
-      );
-    }
-  } catch (e) {
-    if (context.mounted) {
-      try {
-        Navigator.of(context).pop();
-      } catch (_) {}
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Restore failed: $e'), backgroundColor: Colors.red),
-      );
-    }
-  }
-}
 
 Future<void> _checkForUpdates(BuildContext context) async {
   showDialog(
