@@ -1,13 +1,16 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:drift/drift.dart' hide Column;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/platform_info.dart';
 import '../../data/datasources/local/database.dart' as db;
 import '../../data/datasources/remote/tmdb_client.dart';
+import '../../data/datasources/remote/xtream_client.dart';
 import '../../data/services/playback_history_service.dart';
 import '../player/player_service.dart';
 import '../playlists/playlist_providers.dart';
@@ -37,6 +40,7 @@ class _MoviesScreenState extends ConsumerState<MoviesScreen> {
       FocusNode(skipTraversal: PlatformInfo.isTV);
 
   Map<String, int> _categoryCounts = {};
+  final Map<String, String> _categoryNameToId = {};
   List<String> _sortedGroups = [];
   int _allCount = 0;
   int _favCount = 0;
@@ -70,8 +74,9 @@ class _MoviesScreenState extends ConsumerState<MoviesScreen> {
       _offset = cache.movies.length;
       _hasMore = cache.movies.length >= 120;
     } else {
-      _loadCategories();
-      _loadMovies(reset: true);
+      _loadCategories().then((_) {
+        _loadMovies(reset: true);
+      });
     }
   }
 
@@ -107,13 +112,39 @@ class _MoviesScreenState extends ConsumerState<MoviesScreen> {
       final counts = await dbInstance.getVodGroupCounts(providerId: pid);
       final total = await dbInstance.getVodTotalCount(providerId: pid);
       final favs = await dbInstance.getVodFavoriteCount(providerId: pid);
-      final sorted = counts.keys.toList()..sort();
+      List<String> sorted = counts.keys.toList();
+
+      if (pid != null) {
+        final prefs = await SharedPreferences.getInstance();
+        final rawCats = prefs.getString('xtream_vod_cats_$pid');
+        if (rawCats != null && rawCats.isNotEmpty) {
+          try {
+            final List decoded = jsonDecode(rawCats) as List;
+            for (final item in decoded) {
+              final id = item['id']?.toString() ?? '';
+              final name = item['name']?.toString() ?? '';
+              if (id.isNotEmpty && name.isNotEmpty) {
+                _categoryNameToId[name] = id;
+              }
+            }
+            final combined = {...sorted, ..._categoryNameToId.keys};
+            sorted = combined.toList();
+          } catch (_) {}
+        }
+      }
+      sorted.sort();
+
+      var selectedCat = _selectedCategory;
+      if ((selectedCat == 'All' || selectedCat.isEmpty) && counts.isEmpty && sorted.isNotEmpty) {
+        selectedCat = sorted.first;
+      }
 
       if (mounted) {
         setState(() {
           _categoryCounts = counts;
           _sortedGroups = sorted;
-          _allCount = total;
+          _selectedCategory = selectedCat;
+          _allCount = total > 0 ? total : _sortedGroups.length;
           _favCount = favs;
           _loadingCategories = false;
         });
@@ -160,6 +191,66 @@ class _MoviesScreenState extends ConsumerState<MoviesScreen> {
           offset: nextOffset,
           sortBy: sortStr,
         );
+
+        // On-demand lazy fetch from Xtream server if category is not yet cached locally
+        if (fetched.isEmpty &&
+            nextOffset == 0 &&
+            _searchQuery.isEmpty &&
+            activePlaylist?.type == 'xtream' &&
+            activePlaylist?.url != null &&
+            activePlaylist?.username != null &&
+            activePlaylist?.password != null &&
+            pid != null &&
+            _selectedCategory != 'Favorites') {
+          final targetCatId = _categoryNameToId[_selectedCategory] ??
+              (_selectedCategory == 'All' && _categoryNameToId.isNotEmpty
+                  ? _categoryNameToId.values.first
+                  : null);
+
+          if (targetCatId != null && targetCatId.isNotEmpty) {
+            final client = XtreamClient(
+              baseUrl: activePlaylist!.url!,
+              username: activePlaylist.username!,
+              password: activePlaylist.password!,
+            );
+            try {
+              final remoteStreams = await client.getVodStreams(
+                categoryId: targetCatId,
+                providerId: pid,
+                categoryMap: {targetCatId: _selectedCategory},
+              );
+              if (remoteStreams.isNotEmpty) {
+                final companions = remoteStreams.map((c) {
+                  return db.ChannelsCompanion.insert(
+                    id: c.id,
+                    providerId: c.providerId,
+                    name: c.name,
+                    tvgId: Value(c.tvgId),
+                    tvgName: Value(c.tvgName),
+                    tvgLogo: Value(c.tvgLogo),
+                    groupTitle: Value(c.groupTitle),
+                    channelNumber: Value(c.channelNumber),
+                    streamUrl: c.streamUrl,
+                    streamType: const Value('vod'),
+                  );
+                }).toList();
+                await dbInstance.upsertChannels(companions);
+                _categoryCounts[_selectedCategory] = companions.length;
+                fetched = await dbInstance.getVodMoviesPaged(
+                  providerId: pid,
+                  groupTitle: _selectedCategory,
+                  limit: 120,
+                  sortBy: sortStr,
+                );
+              }
+            } catch (e) {
+              debugPrint('[VodOnDemand] Failed to fetch category $targetCatId: $e');
+            } finally {
+              client.dispose();
+            }
+          }
+        }
+
         _hasMore = fetched.length >= 120;
       }
 

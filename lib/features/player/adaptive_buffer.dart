@@ -85,6 +85,7 @@ class AdaptiveBufferManager {
   /// Apply buffer settings for a stream URL and begin monitoring.
   Future<void> applyForStream(String url, PlayerService ps) async {
     _monitorTimer?.cancel();
+    if (kIsWeb) return;
     _currentUrl = url;
     _stableSeconds = 0;
     _stallCount = 0;

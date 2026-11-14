@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:drift/drift.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -286,23 +287,25 @@ class ProviderManager {
         final liveCats = await client.getLiveCategories();
         final liveCatMap = {for (final c in liveCats) c.id: c.name};
         final vodCats = await client.getVodCategories();
-        final vodCatMap = {for (final c in vodCats) c.id: c.name};
         final seriesCats = await client.getSeriesCategories();
-        final seriesCatMap = {for (final c in seriesCats) c.id: c.name};
 
-        onProgress?.call(3, 'Loading channels & catalog...');
+        final prefs = await SharedPreferences.getInstance();
+        if (vodCats.isNotEmpty) {
+          await prefs.setString(
+            'xtream_vod_cats_${provider.id}',
+            jsonEncode(vodCats.map((c) => {'id': c.id, 'name': c.name}).toList()),
+          );
+        }
+        if (seriesCats.isNotEmpty) {
+          await prefs.setString(
+            'xtream_series_cats_${provider.id}',
+            jsonEncode(seriesCats.map((c) => {'id': c.id, 'name': c.name}).toList()),
+          );
+        }
+
+        onProgress?.call(3, 'Loading Live channels...');
         final lives = await client.getLiveStreams(providerId: provider.id, categoryMap: liveCatMap);
-        List<Channel> vods = [];
-        try {
-          vods = await client.getVodStreams(providerId: provider.id, categoryMap: vodCatMap);
-        } catch (_) {}
-        List<Channel> series = [];
-        try {
-          series = await client.getSeriesStreams(providerId: provider.id, categoryMap: seriesCatMap);
-        } catch (_) {}
-
-        final all = [...lives, ...vods, ...series];
-        if (all.isNotEmpty) return all;
+        if (lives.isNotEmpty) return lives;
       } catch (e) {
         debugPrint('[M3uXtream] Xtream API check failed: $e; falling back to direct download');
       } finally {
@@ -388,11 +391,26 @@ class ProviderManager {
         }),
       ]);
       final liveCatMap = {for (final c in catResults[0]) c.id: c.name};
-      final vodCatMap = {for (final c in catResults[1]) c.id: c.name};
-      final seriesCatMap = {for (final c in catResults[2]) c.id: c.name};
+      final vodCats = catResults[1];
+      final seriesCats = catResults[2];
 
-      // 3. Fetch streams sequentially with visible progress updates (avoids TV browser memory spike)
-      onProgress?.call(3, 'Downloading Live TV...');
+      // Persist VOD and Series categories metadata for instant on-demand lazy loading
+      final prefs = await SharedPreferences.getInstance();
+      if (vodCats.isNotEmpty) {
+        await prefs.setString(
+          'xtream_vod_cats_${provider.id}',
+          jsonEncode(vodCats.map((c) => {'id': c.id, 'name': c.name}).toList()),
+        );
+      }
+      if (seriesCats.isNotEmpty) {
+        await prefs.setString(
+          'xtream_series_cats_${provider.id}',
+          jsonEncode(seriesCats.map((c) => {'id': c.id, 'name': c.name}).toList()),
+        );
+      }
+
+      // 3. Fetch Live TV streams only (Movies and Series are loaded on demand per category)
+      onProgress?.call(3, 'Downloading Live TV channels...');
       List<Channel> lives = [];
       Object? liveErr;
       try {
@@ -405,43 +423,26 @@ class ProviderManager {
         debugPrint('[Xtream] Failed to fetch live streams: $e');
       }
 
-      onProgress?.call(3, 'Downloading Movies (${lives.length} Live)...');
-      List<Channel> vods = [];
-      try {
-        vods = await client.getVodStreams(
-          providerId: provider.id,
-          categoryMap: vodCatMap,
-        );
-      } catch (e) {
-        debugPrint('[Xtream] Failed to fetch VOD streams: $e');
-      }
-
-      onProgress?.call(3, 'Downloading Series (${lives.length} Live, ${vods.length} Movies)...');
-      List<Channel> series = [];
-      try {
-        series = await client.getSeriesStreams(
-          providerId: provider.id,
-          categoryMap: seriesCatMap,
-        );
-      } catch (e) {
-        debugPrint('[Xtream] Failed to fetch series streams: $e');
-      }
-
-      // In-place append rather than creating huge 300k-item duplicate list in heap
-      final total = lives;
-      total.addAll(vods);
-      vods = const [];
-      total.addAll(series);
-      series = const [];
-
-      if (total.isEmpty) {
+      if (lives.isEmpty) {
+        // If live stream fetch failed, try fetching first VOD category as fallback
+        if (vodCats.isNotEmpty) {
+          try {
+            final firstCatId = vodCats.first.id;
+            final fallbackVods = await client.getVodStreams(
+              categoryId: firstCatId,
+              providerId: provider.id,
+              categoryMap: {firstCatId: vodCats.first.name},
+            );
+            if (fallbackVods.isNotEmpty) return fallbackVods;
+          } catch (_) {}
+        }
         if (liveErr != null) {
           throw XtreamServerException('Failed to download streams: $liveErr');
         }
         throw const XtreamException('Authentication succeeded, but no streams or channels were found on this account.');
       }
 
-      return total;
+      return lives;
     } finally {
       client.dispose();
     }
@@ -451,6 +452,8 @@ class ProviderManager {
     await _db.deleteProvider(id);
     await _db.deleteEpgSource('epg_$id').catchError((_) {});
     final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('xtream_vod_cats_$id');
+    await prefs.remove('xtream_series_cats_$id');
     if (prefs.getString('active_playlist_id') == id) {
       await prefs.remove('active_playlist_id');
     }

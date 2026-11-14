@@ -69,7 +69,14 @@ final activePlaylistHasMoviesProvider = FutureProvider<bool>((ref) async {
   final playlist = ref.watch(activePlaylistProvider);
   if (playlist == null) return false;
   final dbInstance = ref.watch(databaseProvider);
-  return dbInstance.hasStreamType(playlist.id, 'vod');
+  final hasDb = await dbInstance.hasStreamType(playlist.id, 'vod');
+  if (hasDb) return true;
+  if (playlist.type == 'xtream') {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString('xtream_vod_cats_${playlist.id}');
+    if (raw != null && raw.isNotEmpty && raw != '[]') return true;
+  }
+  return false;
 });
 
 /// Checks if active playlist has Series
@@ -77,7 +84,14 @@ final activePlaylistHasSeriesProvider = FutureProvider<bool>((ref) async {
   final playlist = ref.watch(activePlaylistProvider);
   if (playlist == null) return false;
   final dbInstance = ref.watch(databaseProvider);
-  return dbInstance.hasStreamType(playlist.id, 'series');
+  final hasDb = await dbInstance.hasStreamType(playlist.id, 'series');
+  if (hasDb) return true;
+  if (playlist.type == 'xtream') {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString('xtream_series_cats_${playlist.id}');
+    if (raw != null && raw.isNotEmpty && raw != '[]') return true;
+  }
+  return false;
 });
 
 /// Channel counts for active playlist (live, vod, series)
