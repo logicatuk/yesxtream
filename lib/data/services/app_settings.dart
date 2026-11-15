@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/localization/app_translations.dart';
+import '../../core/platform_info.dart';
 
 class AppSettings {
   final bool autoPreview;
@@ -158,7 +159,9 @@ class AppSettingsNotifier extends StateNotifier<AppSettings> {
   Future<void> _load() async {
     final prefs = await SharedPreferences.getInstance();
     state = AppSettings(
-      autoPreview: prefs.getBool(_kAutoPreview) ?? true,
+      // TV remotes zap channels faster than decode can keep up; require OK
+      // to play unless the user explicitly enables auto-preview.
+      autoPreview: prefs.getBool(_kAutoPreview) ?? !PlatformInfo.isTV,
       autoplayNextEpisode: prefs.getBool(_kAutoplayNext) ?? true,
       preferredAudioLanguage: prefs.getString(_kPrefAudio) ?? 'English',
       fallbackAudioLanguage: prefs.getString(_kFallbackAudio) ?? 'English',

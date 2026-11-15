@@ -8,5 +8,9 @@
     "app:build": "flutter build",
     "app:clean": "flutter clean",
     "test": "flutter test"
+  },
+  "devDependencies": {
+    "@webos-tools/cli": "^3.2.6",
+    "@webosose/ares-cli": "^2.4.0"
   }
 }

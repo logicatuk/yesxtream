@@ -4,6 +4,7 @@ import 'dart:io' show Directory, File;
 
 import 'package:drift/drift.dart' show Value;
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -15,7 +16,9 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/countdown_snackbar.dart';
 import '../../core/fuzzy_match.dart';
+import '../../core/parental_guard.dart';
 import '../../core/platform_info.dart';
+import '../../core/tv_remote.dart';
 import '../../core/weather_clock_widget.dart';
 import '../../data/datasources/local/database.dart' as db;
 import '../../data/datasources/remote/tmdb_client.dart';
@@ -387,17 +390,26 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
   Future<void> _refreshNowPlaying() async {
     if (!mounted) return;
     final database = ref.read(databaseProvider);
-    // Collect EPG channel IDs for all favorited channels + their failover alts
+    // Favorites + preview + a small window around the focused row — not the
+    // entire "All" list (that can be tens of thousands of Drift lookups).
     final epgChannelIds = <String>{};
-    final favChannels = _allChannels.where((c) => _favoritedChannelIds.contains(c.id));
-    for (final c in favChannels) {
+    void addChannel(db.Channel c) {
       final epgId = _getEpgId(c);
       if (epgId != null) epgChannelIds.add(epgId);
     }
-    // Also include any currently filtered channels (e.g. failover alts in view)
-    for (final c in _filteredChannels) {
-      final epgId = _getEpgId(c);
-      if (epgId != null) epgChannelIds.add(epgId);
+    for (final c in _allChannels) {
+      if (_favoritedChannelIds.contains(c.id)) addChannel(c);
+    }
+    final preview = _previewChannel ?? _highlightedChannelNotifier.value;
+    if (preview != null) addChannel(preview);
+    if (_filteredChannels.isNotEmpty) {
+      final center = _selectedIndex.clamp(0, _filteredChannels.length - 1);
+      final radius = _isTvNav ? 25 : 80;
+      final start = (center - radius).clamp(0, _filteredChannels.length);
+      final end = (center + radius + 1).clamp(0, _filteredChannels.length);
+      for (var i = start; i < end; i++) {
+        addChannel(_filteredChannels[i]);
+      }
     }
     if (epgChannelIds.isEmpty) return;
     final globalShift = ref.read(appSettingsProvider).epgTimeShiftHours.abs();
@@ -812,7 +824,8 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
     final rawToPrefixed = <String, String>{};
     final epgNameToId = <String, String>{};
     final epgCallSignToId = <String, String>{}; // WABC → prefixed id
-    for (final src in epgSources) {
+    for (var srcIndex = 0; srcIndex < epgSources.length; srcIndex++) {
+      final src = epgSources[srcIndex];
       final chs = await database.getEpgChannelsForSource(src.id);
       for (final ch in chs) {
         validIds.add(ch.id);
@@ -833,6 +846,11 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
             epgCallSignToId.putIfAbsent(lastPart, () => ch.id);
           }
         }
+      }
+      // Yield between sources on TV/web so D-pad stays responsive.
+      if ((_isTvNav || kIsWeb) && srcIndex < epgSources.length - 1) {
+        await Future<void>.delayed(Duration.zero);
+        if (!mounted) return;
       }
     }
 
@@ -1140,7 +1158,9 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
   void _onChannelFocused(int index, db.Channel channel) {
     _highlightedChannelNotifier.value = channel;
     _focusSelectTimer?.cancel();
-    _focusSelectTimer = Timer(const Duration(milliseconds: 550), () {
+    // Longer settle on TV so D-pad zapping does not start a stream per row.
+    final settleMs = _isTvNav ? 1000 : 550;
+    _focusSelectTimer = Timer(Duration(milliseconds: settleMs), () {
       if (!mounted) return;
       if (index < _filteredChannels.length && _filteredChannels[index].id == channel.id) {
         _selectChannel(index, fromFocus: true);
@@ -1148,7 +1168,7 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
     });
   }
 
-  void _selectChannel(int index, {bool forcePlay = false, bool fromFocus = false}) {
+  Future<void> _selectChannel(int index, {bool forcePlay = false, bool fromFocus = false}) async {
     if (index < 0 || index >= _filteredChannels.length) return;
     final channel = _filteredChannels[index];
     final isSameChannel = index == _selectedIndex;
@@ -1164,13 +1184,22 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
     }
     _fetchLiveEpgForChannel(channel);
 
-    final autoPreview = ref.read(appSettingsProvider).autoPreview;
+    final settings = ref.read(appSettingsProvider);
+    final autoPreview = settings.autoPreview;
     final shouldPlay = forcePlay || autoPreview;
 
     if (!shouldPlay && !isSameChannel) {
       // Show channel details without starting a new stream
       _showInfoOverlay(channel, index);
       _saveSession();
+      return;
+    }
+
+    if (!await ParentalGuard.unlockIfNeeded(
+      context,
+      settings,
+      groupTitle: channel.groupTitle,
+    )) {
       return;
     }
 
@@ -1246,6 +1275,14 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
   }
 
   Future<void> _goFullscreen(db.Channel channel) async {
+    final settings = ref.read(appSettingsProvider);
+    if (!await ParentalGuard.unlockIfNeeded(
+      context,
+      settings,
+      groupTitle: channel.groupTitle,
+    )) {
+      return;
+    }
     final channelMaps = _filteredChannels
         .map((c) => <String, dynamic>{
               'id': c.id,
@@ -1526,8 +1563,7 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
       return KeyEventResult.handled;
     }
 
-    if (event.logicalKey == LogicalKeyboardKey.enter ||
-        event.logicalKey == LogicalKeyboardKey.select) {
+    if (tvIsOkKey(event.logicalKey)) {
       if (_numberBuffer.isNotEmpty) {
         _executeNumberJump();
         return KeyEventResult.handled;
@@ -1636,11 +1672,16 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
   }
 
   void _scrollToIndex(int index) {
-    // Approximate item height of ~52px
-    final offset = (index * 52.0).clamp(
+    if (!_channelListController.hasClients) return;
+    final rowHeight = _isTvNav ? 54.0 : 52.0;
+    final offset = (index * rowHeight).clamp(
       0.0,
       _channelListController.position.maxScrollExtent,
     );
+    if (_isTvNav) {
+      _channelListController.jumpTo(offset);
+      return;
+    }
     _channelListController.animateTo(
       offset,
       duration: const Duration(milliseconds: 200),
@@ -1891,7 +1932,7 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
             const SizedBox(height: 24),
             FilledButton.icon(
               autofocus: true,
-              onPressed: () => context.push('/providers'),
+              onPressed: () => context.push('/playlists'),
               icon: const Icon(Icons.add),
               label: const Text('Add Provider'),
             ),
@@ -2694,7 +2735,9 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
 
   /// Right column: Preview panel in 3-column Live TV browser.
   Widget _buildThreeColumnPreviewPanel({db.Channel? highlightedOverride}) {
-    final playerService = ref.watch(playerServiceProvider);
+    // Provider is a singleton; read avoids rebuilding the whole metadata
+    // column when unrelated Riverpod dependencies change.
+    final playerService = ref.read(playerServiceProvider);
     final channel = highlightedOverride ??
         _previewChannel ??
         (_filteredChannels.isNotEmpty ? _filteredChannels.first : null);
@@ -2809,6 +2852,9 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
                       width: 32,
                       height: 32,
                       fit: BoxFit.contain,
+                      cacheWidth: 64,
+                      cacheHeight: 64,
+                      filterQuality: FilterQuality.low,
                       errorBuilder: (_, __, ___) => const Icon(
                         Icons.live_tv_rounded,
                         color: Color(0xFF6C5CE7),
@@ -3719,7 +3765,7 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
     final rowHeight = _isTvNav ? 48.0 : 42.0;
     return ListView.builder(
       padding: EdgeInsets.zero,
-      cacheExtent: 300,
+      cacheExtent: _isTvNav ? 420 : 300,
       itemExtent: rowHeight,
       itemCount: items.length,
       itemBuilder: (context, index) {
@@ -3771,7 +3817,7 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
           }
           if (key == LogicalKeyboardKey.select ||
               key == LogicalKeyboardKey.enter ||
-              key == LogicalKeyboardKey.gameButtonA) {
+              tvIsOkKey(key)) {
             setState(() {
               _clearSearch();
               _selectedGroup = filterKey;
@@ -4281,7 +4327,7 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
     final listWidget = ListView.builder(
       controller: _channelListController,
       padding: EdgeInsets.zero,
-      cacheExtent: 400,
+      cacheExtent: _isTvNav ? 480 : 400,
       itemExtent: failoverGroupWidgets.isEmpty ? rowHeight : null,
       itemCount: _filteredChannels.length + (failoverGroupWidgets.isNotEmpty ? failoverGroupWidgets.length + 1 : 0),
       itemBuilder: (context, index) {
@@ -4316,7 +4362,7 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
                   final key = event.logicalKey;
                   final isCenterKey = key == LogicalKeyboardKey.select ||
                       key == LogicalKeyboardKey.enter ||
-                      key == LogicalKeyboardKey.gameButtonA;
+                      tvIsOkKey(key);
 
                   if (_isTvNav && isCenterKey) {
                     if (event is KeyDownEvent) {
@@ -4646,7 +4692,7 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
             final key = event.logicalKey;
             if (key == LogicalKeyboardKey.select ||
                 key == LogicalKeyboardKey.enter ||
-                key == LogicalKeyboardKey.gameButtonA) {
+                tvIsOkKey(key)) {
               _playFailoverGroup(group, members);
               return KeyEventResult.handled;
             }
@@ -4786,7 +4832,7 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
                 final key = event.logicalKey;
                 if (key == LogicalKeyboardKey.select ||
                     key == LogicalKeyboardKey.enter ||
-                    key == LogicalKeyboardKey.gameButtonA) {
+                    tvIsOkKey(key)) {
                   _playFailoverGroup(group, members, playChannel: ch);
                   return KeyEventResult.handled;
                 }
@@ -5111,7 +5157,7 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
             // CENTER/SELECT → play the Smart Channel
             if (key == LogicalKeyboardKey.select ||
                 key == LogicalKeyboardKey.enter ||
-                key == LogicalKeyboardKey.gameButtonA) {
+                tvIsOkKey(key)) {
               if (!_multiSelectMode && members.isNotEmpty) {
                 _playFailoverGroup(group, members);
               }
@@ -5274,7 +5320,7 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
                   final key = event.logicalKey;
                   if (key == LogicalKeyboardKey.select ||
                       key == LogicalKeyboardKey.enter ||
-                      key == LogicalKeyboardKey.gameButtonA) {
+                      tvIsOkKey(key)) {
                     _playFailoverGroup(group, members, playChannel: ch);
                     return KeyEventResult.handled;
                   }
@@ -6248,7 +6294,7 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
                             final key = event.logicalKey;
                             final isCenterKey = key == LogicalKeyboardKey.select ||
                                 key == LogicalKeyboardKey.enter ||
-                                key == LogicalKeyboardKey.gameButtonA;
+                                tvIsOkKey(key);
 
                             // Long-press CENTER on TV remote → enter/toggle multi-select
                             if (_isTvNav && isCenterKey) {

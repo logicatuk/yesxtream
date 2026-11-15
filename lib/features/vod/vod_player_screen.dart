@@ -398,7 +398,10 @@ class _VodPlayerScreenState extends ConsumerState<VodPlayerScreen> {
         body: Center(
           child: AspectRatio(
             aspectRatio: _getEffectiveAspectRatio(),
-            child: Video(controller: _videoController),
+            child: Video(
+              controller: _videoController,
+              controls: NoVideoControls,
+            ),
           ),
         ),
       );
@@ -457,7 +460,10 @@ class _VodPlayerScreenState extends ConsumerState<VodPlayerScreen> {
                 Center(
                   child: AspectRatio(
                     aspectRatio: _getEffectiveAspectRatio(),
-                    child: Video(controller: _videoController),
+                    child: Video(
+                      controller: _videoController,
+                      controls: NoVideoControls,
+                    ),
                   ),
                 ),
 

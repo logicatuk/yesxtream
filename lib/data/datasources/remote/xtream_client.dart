@@ -78,12 +78,38 @@ class XtreamClient {
     } on DioException catch (e) {
       final code = e.response?.statusCode;
       if (code == 401 || code == 403) {
-        throw const XtreamAuthException('Invalid username or password (HTTP 401/403)');
+        throw const XtreamAuthException('Invalid username or password');
       }
       if (code == 404) {
-        throw const XtreamServerException('Xtream Codes API endpoint not found on this server (HTTP 404)');
+        throw const XtreamServerException(
+          'Xtream Codes API endpoint not found on this server (HTTP 404)',
+        );
       }
-      throw XtreamServerException('Connection failed: ${e.message ?? e.type.name}');
+      switch (e.type) {
+        case DioExceptionType.connectionTimeout:
+        case DioExceptionType.sendTimeout:
+        case DioExceptionType.receiveTimeout:
+          throw const XtreamServerException(
+            'Connection timed out — the server did not respond in time',
+          );
+        case DioExceptionType.connectionError:
+          throw const XtreamServerException(
+            'Connection failed — could not reach the server',
+          );
+        case DioExceptionType.badResponse:
+          throw XtreamServerException(
+            'Server returned HTTP ${e.response?.statusCode ?? 'error'}',
+          );
+        default:
+          final msg = e.message ?? e.type.name;
+          if (msg.toLowerCase().contains('xmlhttprequest') ||
+              msg.toLowerCase().contains('network layer')) {
+            throw const XtreamServerException(
+              'Connection failed — could not reach the server',
+            );
+          }
+          throw XtreamServerException('Connection failed: $msg');
+      }
     }
 
     if (response.statusCode != null && (response.statusCode! < 200 || response.statusCode! >= 300)) {

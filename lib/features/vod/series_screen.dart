@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../../core/parental_guard.dart';
 import '../../core/platform_info.dart';
 import '../../data/datasources/local/database.dart' as db;
 import '../../data/datasources/remote/tmdb_client.dart';
@@ -273,8 +274,13 @@ class _SeriesScreenState extends ConsumerState<SeriesScreen> {
     }
   }
 
-  void _selectCategory(String cat) {
+  Future<void> _selectCategory(String cat) async {
     if (_selectedCategory == cat) return;
+    final settings = ref.read(appSettingsProvider);
+    if (!await ParentalGuard.unlockIfNeeded(context, settings, groupTitle: cat)) {
+      return;
+    }
+    if (!mounted) return;
     setState(() {
       _selectedCategory = cat;
     });
@@ -554,7 +560,8 @@ class _SeriesScreenState extends ConsumerState<SeriesScreen> {
                             )
                           : GridView.builder(
                               controller: _scrollController,
-                              cacheExtent: 500,
+                              cacheExtent: PlatformInfo.isTV ? 480 : 500,
+                              addAutomaticKeepAlives: !PlatformInfo.isTV,
                               padding: const EdgeInsets.all(16),
                               gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
                                 maxCrossAxisExtent: PlatformInfo.isTV ? 230 : 180,
@@ -1066,15 +1073,28 @@ class _SeriesCardState extends ConsumerState<_SeriesCard> {
     const accent = Color(0xFF6C5CE7);
     final s = widget.series;
 
+    Future<void> openDetail() async {
+      final settings = ref.read(appSettingsProvider);
+      if (!await ParentalGuard.unlockIfNeeded(
+        context,
+        settings,
+        groupTitle: s.groupTitle,
+      )) {
+        return;
+      }
+      if (!context.mounted) return;
+      context.push('/series/detail', extra: s);
+    }
+
     return RepaintBoundary(
       child: FocusableActionDetector(
         actions: {
           ActivateIntent: CallbackAction<ActivateIntent>(onInvoke: (_) {
-            context.push('/series/detail', extra: s);
+            openDetail();
             return null;
           }),
           ButtonActivateIntent: CallbackAction<ButtonActivateIntent>(onInvoke: (_) {
-            context.push('/series/detail', extra: s);
+            openDetail();
             return null;
           }),
         },
@@ -1087,12 +1107,10 @@ class _SeriesCardState extends ConsumerState<_SeriesCard> {
               onEnter: isTV ? null : (_) => setState(() => _isHovered = true),
               onExit: isTV ? null : (_) => setState(() => _isHovered = false),
               child: InkWell(
-                onTap: () {
-                  context.push('/series/detail', extra: s);
-                },
+                onTap: openDetail,
                 borderRadius: BorderRadius.circular(10),
                 child: AnimatedContainer(
-                  duration: Duration(milliseconds: isTV ? 50 : 150),
+                  duration: Duration(milliseconds: isTV ? 0 : 150),
                   decoration: BoxDecoration(
                     color: const Color(0xFF141322),
                     borderRadius: BorderRadius.circular(10),
@@ -1112,7 +1130,7 @@ class _SeriesCardState extends ConsumerState<_SeriesCard> {
                           ]
                         : null,
                   ),
-                  clipBehavior: Clip.antiAlias,
+                  clipBehavior: isTV ? Clip.hardEdge : Clip.antiAlias,
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [

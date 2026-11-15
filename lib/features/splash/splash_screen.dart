@@ -1,19 +1,21 @@
 import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shimmer/shimmer.dart';
 
 import '../../core/platform_info.dart';
+import '../../data/services/app_settings.dart';
 
-class SplashScreen extends StatefulWidget {
+class SplashScreen extends ConsumerStatefulWidget {
   const SplashScreen({super.key});
 
   @override
-  State<SplashScreen> createState() => _SplashScreenState();
+  ConsumerState<SplashScreen> createState() => _SplashScreenState();
 }
 
-class _SplashScreenState extends State<SplashScreen>
+class _SplashScreenState extends ConsumerState<SplashScreen>
     with TickerProviderStateMixin {
   late final AnimationController _controller;
   // Glow controller only created on non-TV platforms
@@ -131,7 +133,14 @@ class _SplashScreenState extends State<SplashScreen>
     _controller.forward();
     _controller.addStatusListener((status) {
       if (status == AnimationStatus.completed && mounted) {
-        context.go('/');
+        final startup = ref.read(appSettingsProvider).startupPage;
+        if (startup == 'Live TV' || startup == 'Live') {
+          context.go('/live');
+        } else if (startup == 'Movies') {
+          context.go('/movies');
+        } else {
+          context.go('/home');
+        }
       }
     });
   }

@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../core/fuzzy_match.dart';
+import '../../core/platform_info.dart';
 import '../../core/tv_back_handler.dart';
 import '../../data/datasources/local/database.dart' as db;
 import '../../data/services/app_settings.dart';
@@ -198,7 +199,8 @@ class _GuideScreenState extends ConsumerState<GuideScreen> {
   }
 
   void _handleKeyEvent(KeyEvent event) {
-    if (event is! KeyDownEvent) return;
+    if (event is! KeyDownEvent && event is! KeyRepeatEvent) return;
+    if (event is KeyRepeatEvent && !PlatformInfo.isTV) return;
     final primaryFocus = FocusManager.instance.primaryFocus;
     if (primaryFocus?.context?.findAncestorWidgetOfExactType<EditableText>() != null) {
       if (event.logicalKey == LogicalKeyboardKey.escape) {
@@ -206,18 +208,21 @@ class _GuideScreenState extends ConsumerState<GuideScreen> {
       }
       return;
     }
-    if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
-      _scrollController.animateTo(
-        (_scrollController.offset - 250).clamp(0.0, _scrollController.position.maxScrollExtent),
-        duration: const Duration(milliseconds: 200),
-        curve: Curves.easeOut,
-      );
-    } else if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
-      _scrollController.animateTo(
-        (_scrollController.offset + 250).clamp(0.0, _scrollController.position.maxScrollExtent),
-        duration: const Duration(milliseconds: 200),
-        curve: Curves.easeOut,
-      );
+    if (event.logicalKey == LogicalKeyboardKey.arrowLeft ||
+        event.logicalKey == LogicalKeyboardKey.arrowRight) {
+      if (!_scrollController.hasClients) return;
+      final delta = event.logicalKey == LogicalKeyboardKey.arrowLeft ? -250.0 : 250.0;
+      final target = (_scrollController.offset + delta)
+          .clamp(0.0, _scrollController.position.maxScrollExtent);
+      if (PlatformInfo.isTV) {
+        _scrollController.jumpTo(target);
+      } else {
+        _scrollController.animateTo(
+          target,
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeOut,
+        );
+      }
     }
   }
 

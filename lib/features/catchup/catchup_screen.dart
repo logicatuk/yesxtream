@@ -4,8 +4,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
+import '../../core/platform_info.dart';
+import '../../core/tv_back_handler.dart';
 import '../../data/datasources/local/database.dart' as db;
 import '../../data/datasources/remote/xtream_client.dart';
+import '../../data/services/app_settings.dart';
 import '../playlists/playlist_providers.dart';
 import '../providers/provider_manager.dart';
 
@@ -266,40 +269,46 @@ class _CatchupScreenState extends ConsumerState<CatchupScreen> {
   @override
   Widget build(BuildContext context) {
     final activePlaylist = ref.watch(activePlaylistProvider);
+    final settings = ref.watch(appSettingsProvider);
     _checkProviderChange(activePlaylist?.id);
 
     if (activePlaylist == null) {
-      return const Scaffold(
-        backgroundColor: Color(0xFF0A0A0F),
-        body: Center(
-          child: Text(
-            'No active playlist selected.',
-            style: TextStyle(color: Colors.white70),
+      return TvBackHandler(
+        child: Scaffold(
+          backgroundColor: const Color(0xFF0A0A0F),
+          body: Center(
+            child: Text(
+              settings.tr('no_active_playlist'),
+              style: const TextStyle(color: Colors.white70),
+            ),
           ),
         ),
       );
     }
 
     if (_isLoadingChannels) {
-      return const Scaffold(
-        backgroundColor: Color(0xFF0A0A0F),
-        body: Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              CircularProgressIndicator(color: Color(0xFF6C5CE7)),
-              SizedBox(height: 16),
-              Text(
-                'Scanning catch-up channels...',
-                style: TextStyle(color: Colors.white70, fontSize: 13),
-              ),
-            ],
+      return TvBackHandler(
+        child: Scaffold(
+          backgroundColor: const Color(0xFF0A0A0F),
+          body: Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const CircularProgressIndicator(color: Color(0xFF6C5CE7)),
+                const SizedBox(height: 16),
+                Text(
+                  settings.tr('scanning_catchup'),
+                  style: const TextStyle(color: Colors.white70, fontSize: 13),
+                ),
+              ],
+            ),
           ),
         ),
       );
     }
 
-    return Scaffold(
+    return TvBackHandler(
+      child: Scaffold(
       backgroundColor: const Color(0xFF0A0A0F),
       body: Row(
         children: [
@@ -338,16 +347,16 @@ class _CatchupScreenState extends ConsumerState<CatchupScreen> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const Text(
-                                'Catch-up Channels',
-                                style: TextStyle(
+                              Text(
+                                settings.tr('catchup_title'),
+                                style: const TextStyle(
                                   color: Colors.white,
                                   fontSize: 16,
                                   fontWeight: FontWeight.bold,
                                 ),
                               ),
                               Text(
-                                '${_filteredChannels.length} available with replay',
+                                '${_filteredChannels.length} ${settings.tr('catchup_available')}',
                                 style: const TextStyle(
                                   color: Colors.white54,
                                   fontSize: 12,
@@ -365,9 +374,11 @@ class _CatchupScreenState extends ConsumerState<CatchupScreen> {
                     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
                     child: TextField(
                       controller: _searchController,
+                      // Keep search out of TV D-pad traversal; focus channels first.
+                      focusNode: FocusNode(skipTraversal: PlatformInfo.isTV),
                       style: const TextStyle(color: Colors.white, fontSize: 13),
                       decoration: InputDecoration(
-                        hintText: 'Search catch-up channels...',
+                        hintText: settings.tr('search_catchup'),
                         hintStyle: const TextStyle(color: Colors.white38, fontSize: 13),
                         prefixIcon: const Icon(Icons.search, color: Colors.white38, size: 18),
                         suffixIcon: _searchQuery.isNotEmpty
@@ -401,8 +412,8 @@ class _CatchupScreenState extends ConsumerState<CatchupScreen> {
                               padding: const EdgeInsets.all(24),
                               child: Text(
                                 _searchQuery.isEmpty
-                                    ? 'No catch-up channels found.\nMake sure your IPTV provider supports TV Archive.'
-                                    : 'No channels match "$_searchQuery"',
+                                    ? settings.tr('no_catchup_channels')
+                                    : '${settings.tr('no_match')} "$_searchQuery"',
                                 textAlign: TextAlign.center,
                                 style: const TextStyle(color: Colors.white54, fontSize: 13),
                               ),
@@ -415,18 +426,34 @@ class _CatchupScreenState extends ConsumerState<CatchupScreen> {
                               final ch = _filteredChannels[index];
                               final isSelected = ch.id == _selectedChannel?.id;
 
-                              return Material(
-                                color: isSelected
-                                    ? const Color(0xFF6C5CE7).withValues(alpha: 0.18)
+                              return FocusableActionDetector(
+                                autofocus: PlatformInfo.isTV && index == 0,
+                                actions: {
+                                  ActivateIntent: CallbackAction<ActivateIntent>(
+                                    onInvoke: (_) {
+                                      _selectChannel(ch);
+                                      return null;
+                                    },
+                                  ),
+                                },
+                                child: Builder(
+                                  builder: (itemCtx) {
+                                    final focused = Focus.of(itemCtx).hasFocus;
+                                    return Material(
+                                color: isSelected || focused
+                                    ? const Color(0xFF6C5CE7).withValues(alpha: focused ? 0.30 : 0.18)
                                     : Colors.transparent,
                                 child: InkWell(
                                   onTap: () => _selectChannel(ch),
                                   child: Container(
                                     height: 58.0,
                                     padding: const EdgeInsets.symmetric(horizontal: 16),
-                                    decoration: const BoxDecoration(
+                                    decoration: BoxDecoration(
                                       border: Border(
-                                        bottom: BorderSide(color: Color(0xFF151424), width: 1),
+                                        bottom: const BorderSide(color: Color(0xFF151424), width: 1),
+                                        left: focused
+                                            ? const BorderSide(color: Colors.white, width: 3)
+                                            : BorderSide.none,
                                       ),
                                     ),
                                     child: Row(
@@ -505,6 +532,9 @@ class _CatchupScreenState extends ConsumerState<CatchupScreen> {
                                     ),
                                   ),
                                 ),
+                                    );
+                                  },
+                                ),
                               );
                             },
                           ),
@@ -517,16 +547,17 @@ class _CatchupScreenState extends ConsumerState<CatchupScreen> {
           // ── Right Column: Past 7 Days Archive & Programmes ──
           Expanded(
             child: _selectedChannel == null
-                ? const Center(
+                ? Center(
                     child: Text(
-                      'Select a channel to browse its catch-up archive',
-                      style: TextStyle(color: Colors.white54),
+                      settings.tr('select_catchup_channel'),
+                      style: const TextStyle(color: Colors.white54),
                     ),
                   )
-                : _buildChannelArchiveView(context, _selectedChannel!),
+                : _buildChannelArchiveView(context, _selectedChannel!, settings),
           ),
         ],
       ),
+    ),
     );
   }
 
@@ -536,6 +567,7 @@ class _CatchupScreenState extends ConsumerState<CatchupScreen> {
   Widget _buildChannelArchiveView(
     BuildContext context,
     db.Channel channel,
+    AppSettings settings,
   ) {
     final targetDate = DateTime.now().subtract(Duration(days: _selectedDayOffset));
 
@@ -608,7 +640,7 @@ class _CatchupScreenState extends ConsumerState<CatchupScreen> {
                   });
                 },
                 icon: const Icon(Icons.play_arrow_rounded, size: 18),
-                label: const Text('Watch Live'),
+                label: Text(settings.tr('watch_live')),
                 style: FilledButton.styleFrom(
                   backgroundColor: const Color(0xFF6C5CE7),
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
@@ -633,37 +665,55 @@ class _CatchupScreenState extends ConsumerState<CatchupScreen> {
 
               String label;
               if (index == 0) {
-                label = "Today";
+                label = settings.tr('today');
               } else if (index == 1) {
-                label = "Yesterday";
+                label = settings.tr('yesterday');
               } else {
                 label = DateFormat('E dd/MM').format(dayDate);
               }
 
-              return InkWell(
-                onTap: () => _selectDay(index),
-                borderRadius: BorderRadius.circular(8),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: isSelected ? const Color(0xFF6C5CE7) : const Color(0xFF161528),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(
-                      color: isSelected
-                          ? const Color(0xFFA29BFE)
-                          : const Color(0xFF26243A),
-                    ),
+              return FocusableActionDetector(
+                actions: {
+                  ActivateIntent: CallbackAction<ActivateIntent>(
+                    onInvoke: (_) {
+                      _selectDay(index);
+                      return null;
+                    },
                   ),
-                  child: Center(
-                    child: Text(
-                      label,
-                      style: TextStyle(
-                        color: isSelected ? Colors.white : Colors.white70,
-                        fontSize: 12,
-                        fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+                },
+                child: Builder(
+                  builder: (pillCtx) {
+                    final focused = Focus.of(pillCtx).hasFocus;
+                    return InkWell(
+                      onTap: () => _selectDay(index),
+                      borderRadius: BorderRadius.circular(8),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: isSelected ? const Color(0xFF6C5CE7) : const Color(0xFF161528),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(
+                            color: focused
+                                ? Colors.white
+                                : (isSelected
+                                    ? const Color(0xFFA29BFE)
+                                    : const Color(0xFF26243A)),
+                            width: focused ? 2.5 : 1,
+                          ),
+                        ),
+                        child: Center(
+                          child: Text(
+                            label,
+                            style: TextStyle(
+                              color: isSelected || focused ? Colors.white : Colors.white70,
+                              fontSize: 12,
+                              fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+                            ),
+                          ),
+                        ),
                       ),
-                    ),
-                  ),
+                    );
+                  },
                 ),
               );
             },
@@ -690,13 +740,8 @@ class _CatchupScreenState extends ConsumerState<CatchupScreen> {
                           ),
                           const SizedBox(height: 12),
                           Text(
-                            'No archive listings recorded for ${DateFormat('dd MMMM yyyy').format(targetDate)}.',
+                            '${settings.tr('no_catchup_programs')} (${DateFormat('dd MMMM yyyy').format(targetDate)})',
                             style: const TextStyle(color: Colors.white54, fontSize: 14),
-                          ),
-                          const SizedBox(height: 6),
-                          const Text(
-                            'You can watch the live channel or try another date.',
-                            style: TextStyle(color: Colors.white38, fontSize: 12),
                           ),
                           const SizedBox(height: 18),
                           OutlinedButton.icon(
@@ -709,7 +754,7 @@ class _CatchupScreenState extends ConsumerState<CatchupScreen> {
                               });
                             },
                             icon: const Icon(Icons.play_arrow_rounded, size: 16),
-                            label: const Text('Play Live Stream'),
+                            label: Text(settings.tr('watch_live')),
                             style: OutlinedButton.styleFrom(
                               foregroundColor: const Color(0xFF6C5CE7),
                               side: const BorderSide(color: Color(0xFF6C5CE7)),
@@ -728,12 +773,27 @@ class _CatchupScreenState extends ConsumerState<CatchupScreen> {
                         final stopTimeStr = DateFormat('HH:mm').format(prog.stop);
                         final durationMin = prog.stop.difference(prog.start).inMinutes;
 
-                        return Container(
+                        return FocusableActionDetector(
+                          actions: {
+                            ActivateIntent: CallbackAction<ActivateIntent>(
+                              onInvoke: (_) {
+                                _playCatchupProgramme(context, channel, prog);
+                                return null;
+                              },
+                            ),
+                          },
+                          child: Builder(
+                            builder: (progCtx) {
+                              final focused = Focus.of(progCtx).hasFocus;
+                              return Container(
                           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                           decoration: BoxDecoration(
                             color: const Color(0xFF131222),
                             borderRadius: BorderRadius.circular(10),
-                            border: Border.all(color: const Color(0xFF22203A)),
+                            border: Border.all(
+                              color: focused ? Colors.white : const Color(0xFF22203A),
+                              width: focused ? 2.5 : 1,
+                            ),
                           ),
                           child: Row(
                             children: [
@@ -801,7 +861,7 @@ class _CatchupScreenState extends ConsumerState<CatchupScreen> {
                               FilledButton.icon(
                                 onPressed: () => _playCatchupProgramme(context, channel, prog),
                                 icon: const Icon(Icons.play_circle_fill_rounded, size: 18),
-                                label: const Text('REPLAY'),
+                                label: Text(settings.tr('play_catchup')),
                                 style: FilledButton.styleFrom(
                                   backgroundColor: const Color(0xFF6C5CE7),
                                   padding:
@@ -814,6 +874,9 @@ class _CatchupScreenState extends ConsumerState<CatchupScreen> {
                                 ),
                               ),
                             ],
+                          ),
+                        );
+                            },
                           ),
                         );
                       },

@@ -7,7 +7,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 /// - Keyboard (desktop)
 /// - Gamepad / game controller
 /// - D-pad navigation
-/// - Web companion remote (via WebSocket — see web_remote_server.dart)
 ///
 /// All inputs are translated to [AppAction]s so the UI layer never
 /// needs to know which device generated the event.
@@ -32,6 +31,7 @@ class InputManager {
     LogicalKeyboardKey.arrowRight: AppAction.navigateRight,
     LogicalKeyboardKey.select: AppAction.select,
     LogicalKeyboardKey.enter: AppAction.select,
+    LogicalKeyboardKey.numpadEnter: AppAction.select,
     LogicalKeyboardKey.gameButtonA: AppAction.select,
 
     // Back

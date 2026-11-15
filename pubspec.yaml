@@ -45,9 +45,6 @@ dependencies:
   archive: ^4.0.4
   string_similarity: ^2.0.0
   fuzzywuzzy: ^1.1.6
-  shelf: ^1.4.2
-  shelf_web_socket: ^2.0.1
-  web_socket_channel: ^3.0.3
   multicast_dns: ^0.3.2+8
   connectivity_plus: ^6.1.2
   wakelock_plus: ^1.2.10

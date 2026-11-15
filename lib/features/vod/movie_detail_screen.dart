@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../../core/platform_info.dart';
 import '../../core/tv_back_handler.dart';
 import '../../data/datasources/local/database.dart' as db;
 import '../../data/datasources/remote/tmdb_client.dart';
@@ -351,21 +352,29 @@ class _MovieDetailScreenState extends ConsumerState<MovieDetailScreen> {
               left: 0,
               right: 0,
               height: 480,
-              child: ShaderMask(
-                shaderCallback: (rect) {
-                  return const LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [Colors.black, Colors.transparent],
-                  ).createShader(Rect.fromLTRB(0, 0, rect.width, rect.height));
-                },
-                blendMode: BlendMode.dstIn,
-                child: CachedNetworkImage(
-                  imageUrl: backdropUrl,
-                  fit: BoxFit.cover,
-                  errorWidget: (_, _, _) => const SizedBox.shrink(),
-                ),
-              ),
+              child: PlatformInfo.isTV
+                  ? CachedNetworkImage(
+                      imageUrl: backdropUrl,
+                      fit: BoxFit.cover,
+                      memCacheWidth: 1280,
+                      errorWidget: (_, _, _) => const SizedBox.shrink(),
+                    )
+                  : ShaderMask(
+                      shaderCallback: (rect) {
+                        return const LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: [Colors.black, Colors.transparent],
+                        ).createShader(Rect.fromLTRB(0, 0, rect.width, rect.height));
+                      },
+                      blendMode: BlendMode.dstIn,
+                      child: CachedNetworkImage(
+                        imageUrl: backdropUrl,
+                        fit: BoxFit.cover,
+                        memCacheWidth: 1280,
+                        errorWidget: (_, _, _) => const SizedBox.shrink(),
+                      ),
+                    ),
             ),
 
           // Gradient overlay
@@ -432,6 +441,7 @@ class _MovieDetailScreenState extends ConsumerState<MovieDetailScreen> {
                               ? CachedNetworkImage(
                                   imageUrl: posterUrl,
                                   fit: BoxFit.cover,
+                                  memCacheWidth: 440,
                                   errorWidget: (_, _, _) => Container(
                                     color: const Color(0xFF1E1E2E),
                                     child: const Icon(Icons.movie, size: 64, color: Colors.white24),

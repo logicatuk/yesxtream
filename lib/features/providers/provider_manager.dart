@@ -350,10 +350,27 @@ class ProviderManager {
       return result.channels;
     } on DioException catch (e) {
       final code = e.response?.statusCode;
+      if (code == 401 || code == 403) {
+        throw Exception('M3U playlist requires login (wrong username/password or protected URL)');
+      }
       if (code == 404) {
         throw Exception('M3U playlist not found (HTTP 404)');
       }
-      throw Exception('Could not reach playlist URL: ${e.message ?? e.type.name}');
+      switch (e.type) {
+        case DioExceptionType.connectionTimeout:
+        case DioExceptionType.sendTimeout:
+        case DioExceptionType.receiveTimeout:
+          throw Exception('Could not reach playlist URL: connection timed out');
+        case DioExceptionType.connectionError:
+          throw Exception('Could not reach playlist URL: connection failed');
+        default:
+          final msg = e.message ?? e.type.name;
+          if (msg.toLowerCase().contains('xmlhttprequest') ||
+              msg.toLowerCase().contains('network layer')) {
+            throw Exception('Could not reach playlist URL: connection failed');
+          }
+          throw Exception('Could not reach playlist URL: $msg');
+      }
     } finally {
       dio.close();
     }

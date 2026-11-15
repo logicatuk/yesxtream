@@ -651,7 +651,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             ),
             const SizedBox(height: 24),
             Text(
-              settings.tr('no_channels_found'),
+              settings.tr('add_playlist'),
               style: const TextStyle(
                 fontSize: 24,
                 fontWeight: FontWeight.bold,
@@ -660,7 +660,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             ),
             const SizedBox(height: 10),
             Text(
-              '${settings.tr('playlists_count')} • Xtream Codes / M3U',
+              settings.tr('onboarding_hint'),
               textAlign: TextAlign.center,
               style: const TextStyle(fontSize: 15, color: Colors.white60),
             ),
@@ -684,7 +684,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               ),
               icon: const Icon(Icons.add_rounded, size: 20),
               label: Text(
-                settings.tr('switch_playlist'),
+                settings.tr('add_playlist'),
                 style: const TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.w700,
@@ -1567,7 +1567,7 @@ class _TvGridTileState extends State<_TvGridTile> {
   @override
   Widget build(BuildContext context) {
     final isTV = PlatformInfo.isTV;
-    final animDur = Duration(milliseconds: isTV ? 60 : 180);
+    final animDur = isTV ? Duration.zero : const Duration(milliseconds: 180);
     return FocusableActionDetector(
       onFocusChange: (f) => setState(() => _isFocused = f),
       onShowHoverHighlight: isTV ? null : (h) => setState(() => _isHovered = h),
@@ -1710,7 +1710,7 @@ class _TvGridTileHorizontalState extends State<_TvGridTileHorizontal> {
   @override
   Widget build(BuildContext context) {
     final isTV = PlatformInfo.isTV;
-    final animDur = Duration(milliseconds: isTV ? 60 : 180);
+    final animDur = isTV ? Duration.zero : const Duration(milliseconds: 180);
     return FocusableActionDetector(
       onFocusChange: (f) => setState(() => _isFocused = f),
       onShowHoverHighlight: isTV ? null : (h) => setState(() => _isHovered = h),

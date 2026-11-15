@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/platform_info.dart';
+import '../core/tv_remote.dart';
 import '../data/services/app_settings.dart';
 import '../features/player/active_player_registry.dart';
 import '../features/player/player_service.dart';
@@ -26,6 +27,7 @@ class _YesXtreamAppState extends ConsumerState<YesXtreamApp> {
     super.initState();
     // Maintain true fullscreen immersive sticky mode across app lifecycle
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+    TvFocusFollower.install();
     _lifecycleListener = AppLifecycleListener(
       onResume: () {
         SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
@@ -73,6 +75,9 @@ class _YesXtreamAppState extends ConsumerState<YesXtreamApp> {
       debugShowCheckedModeBanner: false,
       theme: YesXtreamTheme.dark,
       routerConfig: router,
+      scrollBehavior: (kIsWeb || PlatformInfo.isTV)
+          ? const TvScrollBehavior()
+          : null,
       // On TV platforms (Fire TV, Android TV, LG webOS, Samsung Tizen), ensure
       // Enter/Select/DPAD-Center activate tiles & buttons directly and Arrow
       // keys always perform spatial directional focus instead of scrolling/touch.
@@ -100,6 +105,7 @@ class _YesXtreamAppState extends ConsumerState<YesXtreamApp> {
       builder: (context, child) {
         // Detect TV mode from the first MediaQuery context
         PlatformInfo.detectFromContext(context);
+        TvFocusFollower.tuneImageCache();
         if (PlatformInfo.isTV &&
             FocusManager.instance.highlightStrategy !=
                 FocusHighlightStrategy.alwaysTraditional) {

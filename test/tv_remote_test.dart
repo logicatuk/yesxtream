@@ -6,11 +6,48 @@ import 'package:go_router/go_router.dart';
 import 'package:yesxtream/app/app.dart';
 import 'package:yesxtream/core/platform_info.dart';
 import 'package:yesxtream/core/tv_back_handler.dart';
+import 'package:yesxtream/core/tv_remote.dart';
 import 'package:yesxtream/data/datasources/local/database.dart' as db;
 import 'package:yesxtream/features/home/home_screen.dart';
 import 'package:yesxtream/features/playlists/playlist_providers.dart';
 
 void main() {
+  test('OK key matches Samsung Enter, LG Enter, and Fire Stick Select', () {
+    expect(tvIsOkKey(LogicalKeyboardKey.enter), isTrue);
+    expect(tvIsOkKey(LogicalKeyboardKey.numpadEnter), isTrue);
+    expect(tvIsOkKey(LogicalKeyboardKey.select), isTrue);
+    expect(tvIsOkKey(LogicalKeyboardKey.gameButtonA), isTrue);
+    expect(tvIsOkKey(LogicalKeyboardKey.arrowDown), isFalse);
+    expect(tvIsOkKey(LogicalKeyboardKey.escape), isFalse);
+  });
+
+  test('focused row counts as on-screen only between its reveal offsets', () {
+    expect(
+      tvScrollOffsetKeepsChildVisible(
+        pixels: 500,
+        revealAtStart: 1000,
+        revealAtEnd: 350,
+      ),
+      isTrue,
+    );
+    expect(
+      tvScrollOffsetKeepsChildVisible(
+        pixels: 0,
+        revealAtStart: 1000,
+        revealAtEnd: 350,
+      ),
+      isFalse,
+    );
+    expect(
+      tvScrollOffsetKeepsChildVisible(
+        pixels: 1200,
+        revealAtStart: 1000,
+        revealAtEnd: 350,
+      ),
+      isFalse,
+    );
+  });
+
   tearDown(() {
     PlatformInfo.setTvOverride(false);
     FocusManager.instance.highlightStrategy = FocusHighlightStrategy.automatic;
@@ -80,6 +117,7 @@ void main() {
       await tester.sendKeyEvent(LogicalKeyboardKey.select);
       await tester.pumpAndSettle();
 
+      // Dialog title from add_provider_dialog.dart
       expect(find.text('Add Provider'), findsWidgets);
     },
     variant: TargetPlatformVariant.only(TargetPlatform.android),

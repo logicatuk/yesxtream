@@ -10,6 +10,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'adaptive_buffer.dart';
 import 'active_player_registry.dart';
 import 'stream_proxy.dart';
+import '../../core/platform_info.dart';
 import '../../data/services/app_settings.dart';
 import '../../data/services/stream_alternatives_service.dart';
 import '../../data/services/stream_health_tracker.dart';
@@ -380,6 +381,8 @@ class PlayerService {
 
   void _startFailoverMonitor() {
     _failoverCheckTimer?.cancel();
+    // Web / CanvasKit has no mpv properties; the 2s poll would only burn CPU.
+    if (kIsWeb) return;
     _failoverCheckTimer = Timer.periodic(const Duration(seconds: 2), (_) async {
       if (_currentUrl == null) return;
       if (_alternatives == null && (_failoverGroupUrls == null || _failoverGroupUrls!.isEmpty)) return;
@@ -438,6 +441,9 @@ class PlayerService {
 
   /// Start pre-buffering the best alternative stream in a hidden player.
   void _startWarmPreload() {
+    // Second decoder is too heavy for webOS/Tizen and low-RAM Fire Stick.
+    // Native desktop still benefits from warm failover with vid=no.
+    if (kIsWeb || PlatformInfo.isTV) return;
     if (_currentUrl == null) return;
 
     final alts = _getFailoverAlternatives();

@@ -94,6 +94,16 @@ class AppTranslations {
       'days_ago': 'days ago',
       'no_catchup_programs': 'No catchup programmes available',
       'play_catchup': 'Play Programme',
+      'catchup_available': 'available with replay',
+      'search_catchup': 'Search catch-up channels...',
+      'no_catchup_channels':
+          'No catch-up channels found.\nMake sure your IPTV provider supports TV Archive.',
+      'no_match': 'No channels match',
+      'select_catchup_channel': 'Select a channel to browse its catch-up archive',
+      'no_active_playlist': 'No active playlist selected.',
+      'scanning_catchup': 'Scanning catch-up channels...',
+      'add_playlist': 'Add Playlist',
+      'onboarding_hint': 'Add an Xtream Codes or M3U playlist to get started',
 
       // VOD & Series
       'search_movies': 'Search movies...',

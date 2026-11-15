@@ -12,10 +12,14 @@
     typeof window.webOS !== 'undefined' ||
     typeof window.PalmSystem !== 'undefined';
 
+  // One CanvasKit surface keeps webOS / Tizen GPUs from juggling overlays.
+  // Those chips stall when Flutter promotes every clip and opacity to its
+  // own surface.
   var config = isTvOrFile
     ? {
         canvasKitBaseUrl: 'canvaskit/',
         canvasKitVariant: 'chromium',
+        canvasKitMaximumSurfaces: 1,
       }
     : {};
 

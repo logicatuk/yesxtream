@@ -9,6 +9,7 @@ import android.content.res.Configuration
 import android.os.Build
 import android.os.Bundle
 import android.util.Rational
+import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
@@ -27,6 +28,7 @@ class MainActivity : FlutterActivity() {
     private val PIP_CHANNEL = "io.github.clubanderson.clubtivi/pip"
     private val PLATFORM_CHANNEL = "io.github.clubanderson.clubtivi/platform"
     private var pipChannel: MethodChannel? = null
+    private var lastDpadMs = 0L
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -88,6 +90,56 @@ class MainActivity : FlutterActivity() {
                 flutterView.requestFocus()
             }
         }
+    }
+
+    private fun isDpadKey(code: Int): Boolean {
+        return code == KeyEvent.KEYCODE_DPAD_UP ||
+            code == KeyEvent.KEYCODE_DPAD_DOWN ||
+            code == KeyEvent.KEYCODE_DPAD_LEFT ||
+            code == KeyEvent.KEYCODE_DPAD_RIGHT
+    }
+
+    private fun isOkKey(code: Int): Boolean {
+        return code == KeyEvent.KEYCODE_DPAD_CENTER ||
+            code == KeyEvent.KEYCODE_ENTER ||
+            code == KeyEvent.KEYCODE_NUMPAD_ENTER ||
+            code == KeyEvent.KEYCODE_BUTTON_A ||
+            code == KeyEvent.KEYCODE_BUTTON_SELECT
+    }
+
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (!isTvHardware()) return super.dispatchKeyEvent(event)
+
+        // Fire Stick remotes report Select as DPAD center, BUTTON_A, or
+        // BUTTON_SELECT depending on the Fire OS build. Flutter treats
+        // DPAD center as LogicalKeyboardKey.select.
+        val outgoing = if (
+            event.keyCode == KeyEvent.KEYCODE_BUTTON_SELECT ||
+            event.keyCode == KeyEvent.KEYCODE_BUTTON_A
+        ) {
+            KeyEvent(
+                event.downTime,
+                event.eventTime,
+                event.action,
+                KeyEvent.KEYCODE_DPAD_CENTER,
+                event.repeatCount,
+                event.metaState,
+            )
+        } else {
+            event
+        }
+
+        if (outgoing.action == KeyEvent.ACTION_DOWN && outgoing.repeatCount > 0) {
+            if (isOkKey(outgoing.keyCode)) return true
+            if (isDpadKey(outgoing.keyCode)) {
+                if (outgoing.eventTime - lastDpadMs < 115L) return true
+                lastDpadMs = outgoing.eventTime
+            }
+        } else if (outgoing.action == KeyEvent.ACTION_DOWN && isDpadKey(outgoing.keyCode)) {
+            lastDpadMs = outgoing.eventTime
+        }
+
+        return super.dispatchKeyEvent(outgoing)
     }
 
     private fun hideSystemUI() {

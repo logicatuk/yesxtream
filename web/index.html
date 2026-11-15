@@ -32,8 +32,13 @@
       background-color: #100f29;
       color: #ffffff;
       overflow: hidden;
+      overscroll-behavior: none;
+      touch-action: none;
       user-select: none;
       -webkit-user-select: none;
+    }
+    flt-glass-pane, flutter-view, canvas {
+      outline: none !important;
     }
     #loading-indicator {
       position: absolute;
@@ -152,7 +157,19 @@
     // Maps platform-specific LG webOS / Samsung Tizen TV remote key codes to
     // standard Web KeyboardEvents that Flutter's keyboard handling understands.
     (function() {
+      // Arrows and OK are NOT in here on purpose when the browser already
+      // reports Arrow*/Enter. Older webOS/Tizen builds report keyCode only
+      // (key is "" or "Unidentified" or "Up"), which Flutter web drops.
       var TV_KEY_MAP = {
+        // ── D-pad (normalized only when key/code is missing or non-standard)
+        37:    { key: 'ArrowLeft',  code: 'ArrowLeft',  keyCode: 37 },
+        38:    { key: 'ArrowUp',    code: 'ArrowUp',    keyCode: 38 },
+        39:    { key: 'ArrowRight', code: 'ArrowRight', keyCode: 39 },
+        40:    { key: 'ArrowDown',  code: 'ArrowDown',  keyCode: 40 },
+        13:    { key: 'Enter',      code: 'Enter',      keyCode: 13 },
+        65376: { key: 'Enter',      code: 'Enter',      keyCode: 13 },
+        65385: { key: 'Enter',      code: 'NumpadEnter', keyCode: 13 },
+
         // ── Back / Return → Escape ──────────────────────────────────────────
         461:   { key: 'Escape', code: 'Escape', keyCode: 27 },   // LG Back
         10009: { key: 'Escape', code: 'Escape', keyCode: 27 },   // Tizen Return
@@ -186,6 +203,21 @@
         406:   { key: 'ColorF3Blue',   code: 'ColorF3Blue',   keyCode: 406 },
       };
 
+      // key strings older TV browsers emit instead of ArrowUp / Enter.
+      var KEY_NAME_MAP = {
+        'up': 'ArrowUp',
+        'down': 'ArrowDown',
+        'left': 'ArrowLeft',
+        'right': 'ArrowRight',
+        'ok': 'Enter',
+        'select': 'Enter',
+        'enter': 'Enter'
+      };
+
+      var ARROW_KEYS = { ArrowUp: 1, ArrowDown: 1, ArrowLeft: 1, ArrowRight: 1 };
+      var lastArrowAt = 0;
+      var ARROW_GAP_MS = 115;
+
       var dispatchingMapped = false;
 
       function resolveKeyTarget() {
@@ -200,17 +232,25 @@
         return active;
       }
 
-      function dispatchMappedKey(type, mapped) {
+      function dispatchMappedKey(type, mapped, repeat) {
         var target = resolveKeyTarget();
         dispatchingMapped = true;
         try {
-          var ev = new KeyboardEvent(type, {
+          var init = {
             key: mapped.key,
             code: mapped.code,
             bubbles: true,
             cancelable: true,
             composed: true,
-          });
+            repeat: !!repeat,
+          };
+          var ev;
+          try {
+            ev = new KeyboardEvent(type, init);
+          } catch (err) {
+            delete init.repeat;
+            ev = new KeyboardEvent(type, init);
+          }
           try {
             Object.defineProperty(ev, 'keyCode', { get: function() { return mapped.keyCode; } });
             Object.defineProperty(ev, 'which', { get: function() { return mapped.keyCode; } });
@@ -219,6 +259,15 @@
         } finally {
           dispatchingMapped = false;
         }
+      }
+
+      function normalizedKey(e) {
+        var raw = e.key || '';
+        if (!raw || raw === 'Unidentified' || raw === 'Undefined') {
+          var named = KEY_NAME_MAP[(e.keyIdentifier || '').toLowerCase()];
+          return named || '';
+        }
+        return KEY_NAME_MAP[raw.toLowerCase()] || raw;
       }
 
       function handleKeyEvent(e, type) {
@@ -232,23 +281,55 @@
           return;
         }
 
-        // Some Samsung Tizen browsers send Enter (13) with empty/Unidentified key
-        if (e.keyCode === 13 && (!e.key || e.key === 'Unidentified')) {
+        var keyName = normalizedKey(e);
+        var mapped = TV_KEY_MAP[e.keyCode];
+        if (!mapped && KEY_NAME_MAP[(e.key || '').toLowerCase()]) {
+          var alias = KEY_NAME_MAP[(e.key || '').toLowerCase()];
+          mapped = alias === 'Enter'
+            ? { key: 'Enter', code: 'Enter', keyCode: 13 }
+            : { key: alias, code: alias, keyCode: e.keyCode || 0 };
+        }
+
+        var isArrow = !!ARROW_KEYS[keyName] || (mapped && !!ARROW_KEYS[mapped.key]);
+        var isOk = keyName === 'Enter' || (mapped && mapped.key === 'Enter' && (e.keyCode === 13 || e.keyCode === 23 || e.keyCode === 65376 || e.keyCode === 65385 || KEY_NAME_MAP[(e.key || '').toLowerCase()] === 'Enter'));
+
+        // webOS spatial navigation and Tizen page scroll steal arrows unless
+        // preventDefault runs. Repeats arrive every ~30ms and skip tiles on
+        // these GPUs, so arrows are paced to one step per 115ms.
+        if (isArrow && type === 'keydown') {
+          var now = Date.now();
+          if (now - lastArrowAt < ARROW_GAP_MS) {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            return;
+          }
+          lastArrowAt = now;
+        }
+        if (isOk && e.repeat) {
           e.preventDefault();
           e.stopImmediatePropagation();
-          dispatchMappedKey(type, { key: 'Enter', code: 'Enter', keyCode: 13 });
           return;
         }
 
-        var mapped = TV_KEY_MAP[e.keyCode];
         if (!mapped) {
+          if (isArrow || isOk) e.preventDefault();
+          if (type === 'keydown') resolveKeyTarget();
+          return;
+        }
+
+        // Compare the raw key. "Up" normalizes to ArrowUp but Flutter only
+        // understands the real ArrowUp / Enter strings, so those still get
+        // rewritten below.
+        var rawKey = e.key || '';
+        if (rawKey === mapped.key) {
+          e.preventDefault();
           if (type === 'keydown') resolveKeyTarget();
           return;
         }
 
         e.preventDefault();
         e.stopImmediatePropagation();
-        dispatchMappedKey(type, mapped);
+        dispatchMappedKey(type, mapped, e.repeat);
       }
 
       window.addEventListener('keydown', function(e) { handleKeyEvent(e, 'keydown'); }, true);

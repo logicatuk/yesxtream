@@ -94,6 +94,10 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   String _numberBuffer = '';
   Timer? _numberTimer;
 
+  bool _isBuffering = false;
+  String? _errorMessage;
+  final List<StreamSubscription<dynamic>> _playerSubs = [];
+
   @override
   void initState() {
     super.initState();
@@ -222,17 +226,42 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
       );
     }
 
-    // Load track info once tracks become available
-    playerService.player.stream.tracks.listen((tracks) {
-      if (mounted) _loadTrackInfo();
-    });
+    for (final sub in _playerSubs) {
+      sub.cancel();
+    }
+    _playerSubs.clear();
 
-    playerService.bufferingStream.listen((buffering) {
+    // Load track info once tracks become available
+    _playerSubs.add(playerService.player.stream.tracks.listen((tracks) {
+      if (mounted) _loadTrackInfo();
+    }));
+
+    _playerSubs.add(playerService.bufferingStream.listen((buffering) {
+      if (mounted) setState(() => _isBuffering = buffering);
       playerService.onBufferingChanged(buffering);
       if (playerService.shouldFailover && _hasAlternativeStreams) {
         _switchToNextStream();
       }
-    });
+    }));
+
+    _playerSubs.add(playerService.player.stream.error.listen((err) {
+      if (!mounted || err.isEmpty) return;
+      if (_hasAlternativeStreams) {
+        _switchToNextStream();
+        return;
+      }
+      setState(() {
+        _isBuffering = false;
+        _errorMessage = err;
+      });
+    }));
+
+    if (mounted) {
+      setState(() {
+        _errorMessage = null;
+        _isBuffering = playerService.player.state.buffering;
+      });
+    }
   }
 
   bool get _hasAlternativeStreams {
@@ -241,11 +270,34 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   }
 
   void _switchToNextStream() {
-    setState(() => _currentUrlIndex++);
+    setState(() {
+      _currentUrlIndex++;
+      _errorMessage = null;
+    });
     final urls = [widget.streamUrl, ...widget.alternativeUrls];
     ref.read(playerServiceProvider).play(urls[_currentUrlIndex],
       channelName: _currentChannelName,
     );
+  }
+
+  void _retryCurrentStream() {
+    setState(() => _errorMessage = null);
+    final urls = [widget.streamUrl, ...widget.alternativeUrls];
+    final index = _currentUrlIndex.clamp(0, urls.length - 1);
+    ref.read(playerServiceProvider).play(urls[index],
+      channelName: _currentChannelName,
+    );
+  }
+
+  void _exitPlayer() {
+    if (_shouldStopOnExit) {
+      _playerService?.stop();
+    }
+    if (GoRouter.of(context).canPop()) {
+      GoRouter.of(context).pop();
+    } else {
+      GoRouter.of(context).go('/live');
+    }
   }
 
   Future<void> _showCastPicker() async {
@@ -424,9 +476,18 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   // ---- Keyboard controls ----
 
   KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
-    if (event is! KeyDownEvent) return KeyEventResult.ignored;
+    if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
+      return KeyEventResult.ignored;
+    }
 
     final key = event.logicalKey;
+    final isOk = key == LogicalKeyboardKey.select ||
+        key == LogicalKeyboardKey.enter ||
+        key == LogicalKeyboardKey.numpadEnter ||
+        key == LogicalKeyboardKey.gameButtonA;
+    if (event is KeyRepeatEvent && (!PlatformInfo.isTV || isOk)) {
+      return KeyEventResult.handled;
+    }
     final isTvInput = PlatformInfo.isTV || PlatformInfo.isAndroid;
     if (_showOverlay) _autoHideOverlay();
 
@@ -613,6 +674,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
       _groupTitle = ch['groupTitle']?.toString();
       _providerName = ref.read(streamAlternativesProvider).providerName(ch['providerId']?.toString() ?? '');
       _currentUrlIndex = 0;
+      _errorMessage = null;
       _showOverlay = true;
     });
     final ch = widget.channels[_channelIndex];
@@ -658,6 +720,9 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
     _overlayTimer?.cancel();
     _volumeTimer?.cancel();
     _numberTimer?.cancel();
+    for (final sub in _playerSubs) {
+      sub.cancel();
+    }
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     super.dispose();
   }
@@ -704,8 +769,97 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                 child: _buildVideoSurface(playerService),
               ),
 
+              if (_isBuffering && _errorMessage == null)
+                const Center(
+                  child: CircularProgressIndicator(color: Color(0xFF6C5CE7)),
+                ),
+
+              if (_errorMessage != null)
+                Center(
+                  child: Container(
+                    constraints: const BoxConstraints(maxWidth: 460),
+                    margin: const EdgeInsets.all(24),
+                    padding: const EdgeInsets.all(24),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF141322),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                        color: Colors.redAccent.withValues(alpha: 0.5),
+                      ),
+                    ),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(
+                          Icons.error_outline_rounded,
+                          size: 48,
+                          color: Colors.redAccent,
+                        ),
+                        const SizedBox(height: 12),
+                        Text(
+                          _errorMessage!,
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 15,
+                            height: 1.4,
+                          ),
+                        ),
+                        const SizedBox(height: 20),
+                        Wrap(
+                          spacing: 12,
+                          runSpacing: 10,
+                          alignment: WrapAlignment.center,
+                          children: [
+                            FilledButton.icon(
+                              autofocus: true,
+                              style: FilledButton.styleFrom(
+                                backgroundColor: const Color(0xFF6C5CE7),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 18,
+                                  vertical: 12,
+                                ),
+                              ),
+                              onPressed: _retryCurrentStream,
+                              icon: const Icon(Icons.refresh_rounded, size: 18),
+                              label: const Text('Retry'),
+                            ),
+                            if (_hasAlternativeStreams)
+                              OutlinedButton.icon(
+                                style: OutlinedButton.styleFrom(
+                                  foregroundColor: Colors.white,
+                                  side: const BorderSide(color: Colors.white38),
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 18,
+                                    vertical: 12,
+                                  ),
+                                ),
+                                onPressed: _switchToNextStream,
+                                icon: const Icon(Icons.swap_horiz_rounded, size: 18),
+                                label: const Text('Next source'),
+                              ),
+                            OutlinedButton.icon(
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: Colors.white70,
+                                side: const BorderSide(color: Colors.white24),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 18,
+                                  vertical: 12,
+                                ),
+                              ),
+                              onPressed: _exitPlayer,
+                              icon: const Icon(Icons.arrow_back, size: 18),
+                              label: const Text('Back to Live'),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+
               // ── Live Fullscreen Overlay (Screen 10) ──
-              if (_showOverlay) ...[
+              if (_showOverlay && _errorMessage == null) ...[
                 // Top bar with back button, clock, and quick badges
                 Positioned(
                   top: 0,
@@ -747,6 +901,11 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
                           const Spacer(),
                           StreamInfoBadges(playerService: ref.read(playerServiceProvider)),
                           const SizedBox(width: 8),
+                          IconButton(
+                            icon: const Icon(Icons.cast_rounded, color: Colors.white70, size: 22),
+                            tooltip: 'Cast',
+                            onPressed: _showCastPicker,
+                          ),
                           // Quick PiP trigger
                           IconButton(
                             icon: const Icon(Icons.picture_in_picture_alt_rounded, color: Colors.white70, size: 22),

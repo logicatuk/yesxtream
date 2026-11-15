@@ -51,3 +51,5 @@ flutter_02.png
 *.dmg
 *.exe
 
+node_modules
+devtools_options.yaml

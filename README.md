@@ -1,25 +1,25 @@
-# ⚡ clubTivi
+# ⚡ Yesstream
 
 **The open-source IPTV player that never buffers.** Combine all your sources — free TV, paid services, debrids — into one unified interface with Smart Channels, intelligent EPG matching, and automatic stream failover.
 
 Built with [Flutter](https://flutter.dev) for Android, macOS, Linux, and Windows.
 
 <p align="center">
-  <img src="docs/images/clubtivi-screenshot.png" alt="clubTivi — Smart Channels, EPG Guide, Multi-Provider" width="900">
+  <img src="docs/images/Yesstream-screenshot.png" alt="Yesstream — Smart Channels, EPG Guide, Multi-Provider" width="900">
 </p>
 
 ---
 
-## Why clubTivi?
+## Why Yesstream?
 
-Most IPTV players let you watch one provider at a time. When a stream buffers, you're stuck. And your free channels, paid services, and debrids are all in separate apps. clubTivi changes that — it **brings everything into one interface** and **automatically switches streams** when problems are detected. No more buffering. No more app-hopping. No more manually hunting for a working channel.
+Most IPTV players let you watch one provider at a time. When a stream buffers, you're stuck. And your free channels, paid services, and debrids are all in separate apps. Yesstream changes that — it **brings everything into one interface** and **automatically switches streams** when problems are detected. No more buffering. No more app-hopping. No more manually hunting for a working channel.
 
 ---
 
 ## ✨ Features
 
 ### ⚡ Smart Channels
-The headline feature that sets clubTivi apart. Group the same channel from multiple sources — free TV, paid services, debrids — into a single **Smart Channel**:
+The headline feature that sets Yesstream apart. Group the same channel from multiple sources — free TV, paid services, debrids — into a single **Smart Channel**:
 
 - **One-click creation** — multi-select matching channels, hit "New Smart Channel"
 - **Automatic failover** — when buffering is detected, instantly switches to the next healthy stream
@@ -93,8 +93,8 @@ The headline feature that sets clubTivi apart. Group the same channel from multi
 ### Build & Run
 
 ```bash
-git clone https://github.com/clubanderson/clubTivi.git
-cd clubTivi
+git clone https://github.com/clubanderson/Yesstream.git
+cd Yesstream
 flutter pub get
 flutter run -d macos       # or linux, windows, <android-id>
 ```
@@ -149,7 +149,7 @@ lib/
 ## 📋 Roadmap
 
 ### ✅ Shipped
-- [x] Multi-platform Flutter app (macOS, Android, Linux, Windows)
+- [x] Multi-platform Flutter app (macOS, Android, Linux, Windows, web TV)
 - [x] M3U / M3U Plus / Xtream Codes parser
 - [x] Video player with media_kit
 - [x] Channel list with favorites, search, groups
@@ -157,18 +157,18 @@ lib/
 - [x] Full timeline guide view
 - [x] Multi-provider management
 - [x] Smart Channels with automatic failover
-- [x] Keyboard, gamepad, and remote control navigation
+- [x] Warm failover pre-buffer on native (desktop)
+- [x] Catch-up / timeshift (Xtream archive)
+- [x] Multi-language catalog (EN/FR/ES/DE/AR/PT)
+- [x] Keyboard, gamepad, and remote control navigation (LG / Samsung / Fire Stick)
 - [x] Instant startup with phased loading
 - [x] Session persistence
+- [x] DLNA / LG cast from live player
 
 ### 🔜 Coming Next
-- [ ] Warm failover (background stream health monitoring)
-- [ ] Catch-up / timeshift (provider-dependent)
-- [ ] Recording (local DVR)
+- [ ] Parental PIN enforcement across Live / Movies / Series
 - [ ] Theming and customization
-- [ ] Backup/restore settings and Smart Channel configs
-- [ ] Multi-language support
-- [ ] Web companion remote control
+- [ ] Commercial device activation (backend-admin)
 
 ---
 
@@ -191,4 +191,4 @@ This project is licensed under the Apache License 2.0 — see the [LICENSE](LICE
 
 ## ⚠️ Disclaimer
 
-clubTivi is a media player application. It does not provide any content, streams, or IPTV subscriptions. Users are responsible for ensuring they have the legal right to access any content they configure in the application.
+Yesstream is a media player application. It does not provide any content, streams, or IPTV subscriptions. Users are responsible for ensuring they have the legal right to access any content they configure in the application.

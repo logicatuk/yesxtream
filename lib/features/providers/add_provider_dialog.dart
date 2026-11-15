@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/platform_info.dart';
 import '../playlists/playlist_providers.dart';
+import 'playlist_error.dart';
 import 'provider_manager.dart';
 
 /// Shows the responsive Add Provider experience.
@@ -221,11 +222,12 @@ class _AddProviderPageState extends ConsumerState<_AddProviderPage> {
       );
     } catch (e) {
       if (!mounted) return;
+      final info = formatPlaylistError(e);
       _showFeedbackDialog(
-        icon: Icons.error_outline_rounded,
-        iconColor: const Color(0xFFFF6B81),
-        title: 'Connection Failed',
-        message: 'Failed to add provider:\n$e',
+        icon: info.icon,
+        iconColor: info.color,
+        title: info.title,
+        message: info.message,
       );
     } finally {
       if (mounted) {
