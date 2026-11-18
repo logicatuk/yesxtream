@@ -48,7 +48,7 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
     // Shorter duration on TV for fast startup
     _controller = AnimationController(
       vsync: this,
-      duration: Duration(milliseconds: _isTV ? 700 : 3500),
+      duration: Duration(milliseconds: _isTV ? 250 : 2500),
     );
 
     // Glow pulse: only on desktop (continuous loop is expensive on TV GPUs)

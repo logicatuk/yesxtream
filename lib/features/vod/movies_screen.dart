@@ -578,7 +578,7 @@ class _MoviesScreenState extends ConsumerState<MoviesScreen> {
                             )
                           : GridView.builder(
                               controller: _scrollController,
-                              cacheExtent: PlatformInfo.isTV ? 480 : 500,
+                              cacheExtent: PlatformInfo.isTV ? 200 : 500,
                               addAutomaticKeepAlives: !PlatformInfo.isTV,
                               padding: const EdgeInsets.all(20),
                               gridDelegate:
@@ -1079,13 +1079,22 @@ class _MovieCard extends ConsumerStatefulWidget {
 }
 
 class _MovieCardState extends ConsumerState<_MovieCard> {
+  static final _explicitRatingRegex = RegExp(
+    r'(?:imdb|tmdb|rating|rate|\*|★)\s*[:\-]?\s*([1-9](?:\.\d)?|10(?:\.0)?)',
+    caseSensitive: false,
+  );
+  static final _bracketRatingRegex = RegExp(r'[\[\(]([1-9]\.\d)(?:\s*\/\s*10)?[\]\)]');
+  static final _slashRatingRegex = RegExp(r'\b([1-9](?:\.\d)?|10)\s*\/\s*10\b');
+
   bool _isHovered = false;
   late bool _isFavorite;
+  String? _rating;
 
   @override
   void initState() {
     super.initState();
     _isFavorite = widget.movie.favorite;
+    _rating = _extractRating(widget.movie.name);
   }
 
   @override
@@ -1093,6 +1102,9 @@ class _MovieCardState extends ConsumerState<_MovieCard> {
     super.didUpdateWidget(oldWidget);
     if (widget.movie.favorite != oldWidget.movie.favorite) {
       _isFavorite = widget.movie.favorite;
+    }
+    if (widget.movie.name != oldWidget.movie.name) {
+      _rating = _extractRating(widget.movie.name);
     }
   }
 
@@ -1189,7 +1201,7 @@ class _MovieCardState extends ConsumerState<_MovieCard> {
                                 ? CachedNetworkImage(
                                     imageUrl: movie.tvgLogo!,
                                     fit: BoxFit.cover,
-                                    memCacheWidth: 320,
+                                    memCacheWidth: PlatformInfo.isTV ? 160 : 320,
                                     errorWidget: (_, __, ___) => const Center(
                                       child: Icon(Icons.movie_rounded,
                                           size: 40, color: Colors.white24),
@@ -1272,7 +1284,7 @@ class _MovieCardState extends ConsumerState<_MovieCard> {
                             ),
                           ),
                           // Floating blue rating pill badge (Only shown if a REAL rating exists)
-                          if (_extractRating(movie.name) != null)
+                          if (_rating != null)
                             Positioned(
                               bottom: 6,
                               left: 6,
@@ -1290,7 +1302,7 @@ class _MovieCardState extends ConsumerState<_MovieCard> {
                                   ],
                                 ),
                                 child: Text(
-                                  _extractRating(movie.name)!,
+                                  _rating!,
                                   style: const TextStyle(
                                     color: Colors.white,
                                     fontSize: 10,
@@ -1335,12 +1347,9 @@ class _MovieCardState extends ConsumerState<_MovieCard> {
     );
   }
 
-  String? _extractRating(String name) {
+  static String? _extractRating(String name) {
     // 1. Look for explicit IMDb/TMDB or Star ratings: e.g. "IMDb: 7.8", "Rating: 8.2", "★ 7.5", "8.2/10"
-    final explicitMatch = RegExp(
-      r'(?:imdb|tmdb|rating|rate|\*|★)\s*[:\-]?\s*([1-9](?:\.\d)?|10(?:\.0)?)',
-      caseSensitive: false,
-    ).firstMatch(name);
+    final explicitMatch = _explicitRatingRegex.firstMatch(name);
     if (explicitMatch != null) {
       final val = double.tryParse(explicitMatch.group(1) ?? '');
       if (val != null && val >= 1.0 && val <= 10.0) {
@@ -1349,7 +1358,7 @@ class _MovieCardState extends ConsumerState<_MovieCard> {
     }
 
     // 2. Look for bracketed rating: e.g. "[7.8]" or "(8.2)" (ignoring 4-digit years like [2024])
-    final bracketMatch = RegExp(r'[\[\(]([1-9]\.\d)(?:\s*\/\s*10)?[\]\)]').firstMatch(name);
+    final bracketMatch = _bracketRatingRegex.firstMatch(name);
     if (bracketMatch != null) {
       final val = double.tryParse(bracketMatch.group(1) ?? '');
       if (val != null && val >= 1.0 && val <= 10.0) {
@@ -1358,7 +1367,7 @@ class _MovieCardState extends ConsumerState<_MovieCard> {
     }
 
     // 3. Look for explicit "/10" rating: e.g. "8.5/10" or "7/10"
-    final slashMatch = RegExp(r'\b([1-9](?:\.\d)?|10)\s*\/\s*10\b').firstMatch(name);
+    final slashMatch = _slashRatingRegex.firstMatch(name);
     if (slashMatch != null) {
       final val = double.tryParse(slashMatch.group(1) ?? '');
       if (val != null && val >= 1.0 && val <= 10.0) {

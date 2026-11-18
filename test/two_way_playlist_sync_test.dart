@@ -70,6 +70,67 @@ void main() {
       expect(updated.deviceKey, equals('739102'));
       expect(updated.portalLoginUrl, contains('key=739102'));
     });
+
+    test('Two-way sync payload formats serverId, localId, and url without host', () async {
+      await database.upsertProvider(
+        const db.ProvidersCompanion(
+          id: Value('local_p1'),
+          name: Value('Local Playlist'),
+          type: Value('m3u'),
+          url: Value('myiptv.com/list.m3u'),
+        ),
+      );
+      await database.upsertProvider(
+        const db.ProvidersCompanion(
+          id: Value('remote_pl_456'),
+          name: Value('Remote Xtream'),
+          type: Value('xtream'),
+          url: Value('xtreamserver.tv:8080'),
+          username: Value('usr1'),
+          password: Value('pwd1'),
+        ),
+      );
+
+      final all = await database.getAllProviders();
+      final items = all.map((p) {
+        final isRemote = p.id.startsWith('remote_');
+        final serverId = isRemote ? p.id.replaceFirst('remote_', '') : null;
+        final cleanUrl = normalizeProviderUrl(p.url ?? '');
+        return {
+          if (serverId != null) 'id': serverId,
+          'localId': p.id,
+          'name': p.name,
+          'type': p.type.toLowerCase() == 'm3u' ? 'm3u' : 'xtream',
+          'url': cleanUrl,
+          'username': p.username ?? '',
+          'password': p.password ?? '',
+        };
+      }).toList();
+
+      expect(items.length, equals(2));
+      final localItem = items.firstWhere((x) => x['localId'] == 'local_p1');
+      expect(localItem.containsKey('id'), isFalse);
+      expect(localItem.containsKey('host'), isFalse);
+      expect(localItem['url'], equals('http://myiptv.com/list.m3u'));
+
+      final remoteItem = items.firstWhere((x) => x['localId'] == 'remote_pl_456');
+      expect(remoteItem['id'], equals('pl_456'));
+      expect(remoteItem.containsKey('host'), isFalse);
+      expect(remoteItem['url'], equals('http://xtreamserver.tv:8080'));
+    });
+
+    test('DeviceEntitlementState stores and checks lockedProviderIds', () {
+      const state = DeviceEntitlementState(
+        status: 'active',
+        lockedProviderIds: {'remote_locked_1', 'remote_locked_2'},
+      );
+      expect(state.lockedProviderIds.contains('remote_locked_1'), isTrue);
+      expect(state.lockedProviderIds.contains('other_id'), isFalse);
+
+      final copy = state.copyWith(lockedProviderIds: {'new_locked'});
+      expect(copy.lockedProviderIds.contains('new_locked'), isTrue);
+      expect(copy.lockedProviderIds.contains('remote_locked_1'), isFalse);
+    });
   });
 }
 

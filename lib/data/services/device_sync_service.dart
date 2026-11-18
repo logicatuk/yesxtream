@@ -30,6 +30,7 @@ class DeviceEntitlementState {
   final String? lastError;
   final DateTime? lastSyncTime;
   final int remotePlaylistsCount;
+  final Set<String> lockedProviderIds;
 
   const DeviceEntitlementState({
     this.status = 'trial',
@@ -45,6 +46,7 @@ class DeviceEntitlementState {
     this.lastError,
     this.lastSyncTime,
     this.remotePlaylistsCount = 0,
+    this.lockedProviderIds = const {},
   });
 
   bool get isTrial => status.toLowerCase() == 'trial';
@@ -76,6 +78,7 @@ class DeviceEntitlementState {
     String? lastError,
     DateTime? lastSyncTime,
     int? remotePlaylistsCount,
+    Set<String>? lockedProviderIds,
   }) {
     return DeviceEntitlementState(
       status: status ?? this.status,
@@ -91,6 +94,7 @@ class DeviceEntitlementState {
       lastError: lastError,
       lastSyncTime: lastSyncTime ?? this.lastSyncTime,
       remotePlaylistsCount: remotePlaylistsCount ?? this.remotePlaylistsCount,
+      lockedProviderIds: lockedProviderIds ?? this.lockedProviderIds,
     );
   }
 }
@@ -102,6 +106,8 @@ class DeviceSyncNotifier extends StateNotifier<DeviceEntitlementState> with Widg
   Timer? _periodicTimer;
   StreamSubscription? _sseSub;
   bool _initialized = false;
+  bool _isMutatingCloud = false;
+  int _lastConfigVersion = 0;
 
   DeviceSyncNotifier(this._db, this._manager) : super(const DeviceEntitlementState()) {
     _init();
@@ -158,7 +164,10 @@ class DeviceSyncNotifier extends StateNotifier<DeviceEntitlementState> with Widg
     final plan = prefs.getString('device_plan');
     final trialDays = prefs.getInt('device_trial_days') ?? 7;
     final configVersion = prefs.getInt('device_config_version') ?? 0;
+    _lastConfigVersion = configVersion;
     final portalUrl = prefs.getString('device_portal_url');
+    final lockedList = prefs.getStringList('device_locked_provider_ids') ?? [];
+    final lockedSet = lockedList.toSet();
 
     DateTime? trialEndsAt;
     final trialStr = prefs.getString('device_trial_ends_at');
@@ -180,13 +189,16 @@ class DeviceSyncNotifier extends StateNotifier<DeviceEntitlementState> with Widg
       expiresAt: expiresAt,
       configVersion: configVersion,
       portalLoginUrl: portalUrl,
+      lockedProviderIds: lockedSet,
     );
   }
 
-  /// Push customer-created local playlists to the backend cloud so
+  /// Push local and cloud playlists to the backend cloud so
   /// Resellers/Sub-Resellers see them in /panel/devices.
   Future<void> pushLocalPlaylistsToCloud() async {
     if (_isTestMode) return;
+    if (_isMutatingCloud) return;
+    _isMutatingCloud = true;
     try {
       final identity = await DeviceIdentityService.getIdentity();
       if (!identity.serverRegistered || identity.credential.isEmpty) {
@@ -195,17 +207,18 @@ class DeviceSyncNotifier extends StateNotifier<DeviceEntitlementState> with Widg
       }
 
       final allProviders = await _db.getAllProviders();
-      // Only push customer-created local playlists (exclude remote_ ones)
-      final localProviders = allProviders.where((p) => !p.id.startsWith('remote_')).toList();
 
       final payload = {
-        'playlists': localProviders.map((p) {
-          final isM3u = p.type.toLowerCase() == 'm3u';
+        'playlists': allProviders.map((p) {
+          final isRemote = p.id.startsWith('remote_');
+          final serverId = isRemote ? p.id.replaceFirst('remote_', '') : null;
+          final cleanUrl = normalizeProviderUrl(p.url ?? '');
           return {
+            if (serverId != null) 'id': serverId,
             'localId': p.id,
             'name': p.name,
-            'type': isM3u ? 'm3u' : 'xtream',
-            if (isM3u) 'url': p.url ?? '' else 'host': p.url ?? '',
+            'type': p.type.toLowerCase() == 'm3u' ? 'm3u' : 'xtream',
+            'url': cleanUrl,
             'username': p.username ?? '',
             'password': p.password ?? '',
           };
@@ -228,15 +241,73 @@ class DeviceSyncNotifier extends StateNotifier<DeviceEntitlementState> with Widg
         data: payload,
       );
 
+      if (res.statusCode == 200 && res.data is Map) {
+        final version = res.data['configVersion'];
+        if (version is int && version > _lastConfigVersion) {
+          _lastConfigVersion = version;
+          state = state.copyWith(configVersion: version);
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setInt('device_config_version', version);
+        }
+      }
+
       debugPrint('[DeviceSync] pushLocalPlaylistsToCloud success: HTTP ${res.statusCode}');
     } catch (e) {
       debugPrint('[DeviceSync] pushLocalPlaylistsToCloud warning: $e');
+    } finally {
+      _isMutatingCloud = false;
+    }
+  }
+
+  /// Deletes a playlist from the cloud backend.
+  /// If the playlist originated from the server (remote_<id>), calls DELETE /device/playlists/<id>.
+  /// Afterwards, pushes current local state to cloud.
+  Future<bool> deleteRemotePlaylistFromCloud(String providerId) async {
+    if (_isTestMode) return true;
+    _isMutatingCloud = true;
+    try {
+      final identity = await DeviceIdentityService.getIdentity();
+      if (!identity.serverRegistered || identity.credential.isEmpty) {
+        return false;
+      }
+
+      final dio = Dio(
+        BaseOptions(
+          connectTimeout: const Duration(seconds: 12),
+          receiveTimeout: const Duration(seconds: 15),
+          headers: {
+            'Authorization': 'Bearer ${identity.credential}',
+          },
+        ),
+      );
+
+      if (providerId.startsWith('remote_')) {
+        final serverId = providerId.replaceFirst('remote_', '');
+        try {
+          final res = await dio.delete('$kYestreamApiBase/device/playlists/$serverId');
+          if (res.data is Map && res.data['configVersion'] is int) {
+            _lastConfigVersion = res.data['configVersion'] as int;
+          }
+        } catch (e) {
+          debugPrint('[DeviceSync] Server DELETE warning: $e');
+        }
+      }
+
+      // Also push remaining local providers to server
+      _isMutatingCloud = false;
+      await pushLocalPlaylistsToCloud();
+      return true;
+    } catch (e) {
+      debugPrint('[DeviceSync] deleteRemotePlaylistFromCloud error: $e');
+      return false;
+    } finally {
+      _isMutatingCloud = false;
     }
   }
 
   /// Manually or automatically performs heartbeat, entitlement check, and Drift provider reconciliation.
   Future<void> sync({bool force = false}) async {
-    if (state.isSyncing) return;
+    if (state.isSyncing || _isMutatingCloud) return;
     state = state.copyWith(isSyncing: true, lastError: null);
 
     try {
@@ -325,6 +396,7 @@ class DeviceSyncNotifier extends StateNotifier<DeviceEntitlementState> with Widg
 
         // 3. Reconcile remote playlists into Drift AppDatabase
         int remoteCount = 0;
+        final lockedIds = <String>{};
         final rawPlaylists = data['playlists'];
         if (rawPlaylists is List) {
           final activeRemoteIds = <String>{};
@@ -337,7 +409,7 @@ class DeviceSyncNotifier extends StateNotifier<DeviceEntitlementState> with Widg
 
             final pId = map['id']?.toString() ?? '';
             final localId = map['localId']?.toString();
-            var pHost = (map['host'] ?? map['url'])?.toString().trim() ?? '';
+            var pHost = (map['url'] ?? map['host'])?.toString().trim() ?? '';
             if (pId.isEmpty && (localId == null || localId.isEmpty)) continue;
             if (pHost.isNotEmpty &&
                 !pHost.toLowerCase().startsWith('http://') &&
@@ -349,9 +421,11 @@ class DeviceSyncNotifier extends StateNotifier<DeviceEntitlementState> with Widg
             final pType = (map['type']?.toString().toLowerCase() == 'm3u') ? 'm3u' : 'xtream';
             final pUser = map['username']?.toString();
             final pPass = map['password']?.toString();
+            final isLocked = map['lockedByReseller'] == true || map['locked'] == true;
 
             // Check if this playlist already exists locally (matched by localId)
             if (localId != null && localProviderMap.containsKey(localId)) {
+              if (isLocked) lockedIds.add(localId);
               // Update existing local row if remote metadata changed
               final existing = localProviderMap[localId]!;
               if (existing.name != pName ||
@@ -372,6 +446,7 @@ class DeviceSyncNotifier extends StateNotifier<DeviceEntitlementState> with Widg
 
             final remoteDbId = 'remote_$pId';
             activeRemoteIds.add(remoteDbId);
+            if (isLocked) lockedIds.add(remoteDbId);
 
             final prev = existingProviders.where((x) => x.id == remoteDbId).firstOrNull;
 
@@ -408,6 +483,8 @@ class DeviceSyncNotifier extends StateNotifier<DeviceEntitlementState> with Widg
           remoteCount = activeRemoteIds.length;
         }
 
+        _lastConfigVersion = configVersion;
+
         // 4. Update state & persist locally
         state = state.copyWith(
           status: status,
@@ -422,6 +499,7 @@ class DeviceSyncNotifier extends StateNotifier<DeviceEntitlementState> with Widg
           isSyncing: false,
           lastSyncTime: DateTime.now(),
           remotePlaylistsCount: remoteCount,
+          lockedProviderIds: lockedIds,
         );
 
         final prefs = await SharedPreferences.getInstance();
@@ -429,6 +507,7 @@ class DeviceSyncNotifier extends StateNotifier<DeviceEntitlementState> with Widg
         if (plan != null) await prefs.setString('device_plan', plan);
         await prefs.setInt('device_trial_days', trialDays);
         await prefs.setInt('device_config_version', configVersion);
+        await prefs.setStringList('device_locked_provider_ids', lockedIds.toList());
         if (portalUrl.isNotEmpty) await prefs.setString('device_portal_url', portalUrl);
         if (trialEndsAt != null) {
           await prefs.setString('device_trial_ends_at', trialEndsAt.toIso8601String());
@@ -471,6 +550,25 @@ class DeviceSyncNotifier extends StateNotifier<DeviceEntitlementState> with Widg
             .listen(
           (line) {
             if (line.contains('device.configuration.changed') || line.contains('license.changed')) {
+              if (_isMutatingCloud) {
+                debugPrint('[DeviceSync] SSE event ignored: mutating cloud in progress');
+                return;
+              }
+              // Ignore stale configVersion events
+              try {
+                if (line.startsWith('data:')) {
+                  final dataStr = line.substring(5).trim();
+                  final decoded = jsonDecode(dataStr);
+                  if (decoded is Map && decoded['configVersion'] is int) {
+                    final eventVer = decoded['configVersion'] as int;
+                    if (eventVer <= _lastConfigVersion) {
+                      debugPrint('[DeviceSync] SSE event ignored: eventVer $eventVer <= $_lastConfigVersion');
+                      return;
+                    }
+                  }
+                }
+              } catch (_) {}
+
               debugPrint('[DeviceSync] SSE Event received: $line — triggering sync');
               sync();
             }

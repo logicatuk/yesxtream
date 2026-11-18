@@ -409,6 +409,7 @@ class _PlaylistCardState extends ConsumerState<_PlaylistCard> {
         : 'Never';
 
     final isXtream = p.type == 'xtream';
+    final isLocked = ref.watch(deviceEntitlementProvider).lockedProviderIds.contains(p.id);
 
     return Container(
       padding: const EdgeInsets.all(18),
@@ -482,6 +483,32 @@ class _PlaylistCardState extends ConsumerState<_PlaylistCard> {
                             fontWeight: FontWeight.bold,
                             color: Color(0xFFA29BFE),
                           ),
+                        ),
+                      ),
+                    ],
+                    if (isLocked) ...[
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFE17055).withValues(alpha: 0.2),
+                          borderRadius: BorderRadius.circular(4),
+                          border: Border.all(color: const Color(0xFFE17055).withValues(alpha: 0.4)),
+                        ),
+                        child: const Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.lock_rounded, size: 10, color: Color(0xFFFAB1A0)),
+                            SizedBox(width: 3),
+                            Text(
+                              'Locked by reseller',
+                              style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.bold,
+                                color: Color(0xFFFAB1A0),
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     ],
@@ -560,6 +587,8 @@ class _ManagePlaylistDialogState extends ConsumerState<_ManagePlaylistDialog> {
           ..where((t) => t.id.equals(widget.playlist.id)))
         .write(db.ProvidersCompanion(name: Value(newName)));
 
+    ref.read(deviceEntitlementProvider.notifier).pushLocalPlaylistsToCloud().catchError((_) {});
+
     if (!mounted) return;
     Navigator.of(context).pop();
     ScaffoldMessenger.of(context).showSnackBar(
@@ -618,7 +647,7 @@ class _ManagePlaylistDialogState extends ConsumerState<_ManagePlaylistDialog> {
       try {
         final manager = ref.read(providerManagerProvider);
         await manager.deleteProvider(widget.playlist.id);
-        ref.read(deviceEntitlementProvider.notifier).pushLocalPlaylistsToCloud().catchError((_) {});
+        await ref.read(deviceEntitlementProvider.notifier).deleteRemotePlaylistFromCloud(widget.playlist.id);
         await ref.read(activePlaylistIdProvider.notifier).clearIfDeleted(widget.playlist.id);
         ref.invalidate(allPlaylistsProvider);
         ref.invalidate(activePlaylistStatsProvider);
@@ -642,6 +671,8 @@ class _ManagePlaylistDialogState extends ConsumerState<_ManagePlaylistDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final isLocked = ref.watch(deviceEntitlementProvider).lockedProviderIds.contains(widget.playlist.id);
+
     return Dialog(
       backgroundColor: const Color(0xFF141322),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -672,32 +703,58 @@ class _ManagePlaylistDialogState extends ConsumerState<_ManagePlaylistDialog> {
               ),
               const SizedBox(height: 18),
 
-              // Rename field
-              TextFormField(
-                controller: _nameCtrl,
-                style: const TextStyle(color: Colors.white, fontSize: 14),
-                decoration: InputDecoration(
-                  labelText: 'Rename Playlist',
-                  filled: true,
-                  fillColor: const Color(0xFF1B1A2C),
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                  suffixIcon: IconButton(
-                    icon: const Icon(Icons.check, color: Color(0xFF6C5CE7)),
-                    onPressed: _rename,
+              if (isLocked) ...[
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFE17055).withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: const Color(0xFFE17055).withValues(alpha: 0.4)),
+                  ),
+                  child: const Row(
+                    children: [
+                      Icon(Icons.lock_rounded, size: 20, color: Color(0xFFFAB1A0)),
+                      SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          'This playlist is managed and locked by your service provider or reseller. Modifications and removal are disabled.',
+                          style: TextStyle(color: Color(0xFFFAB1A0), fontSize: 12.5, height: 1.3),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-              ),
+                const SizedBox(height: 16),
+              ],
 
-              const SizedBox(height: 18),
-              const Divider(color: Color(0xFF26243A)),
-              const SizedBox(height: 8),
+              // Rename field (disabled if locked)
+              if (!isLocked) ...[
+                TextFormField(
+                  controller: _nameCtrl,
+                  style: const TextStyle(color: Colors.white, fontSize: 14),
+                  decoration: InputDecoration(
+                    labelText: 'Rename Playlist',
+                    filled: true,
+                    fillColor: const Color(0xFF1B1A2C),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                    suffixIcon: IconButton(
+                      icon: const Icon(Icons.check, color: Color(0xFF6C5CE7)),
+                      onPressed: _rename,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 18),
+                const Divider(color: Color(0xFF26243A)),
+                const SizedBox(height: 8),
+              ],
 
-              ListTile(
-                leading: const Icon(Icons.edit_rounded, color: Colors.white70),
-                title: const Text('Edit Connection'),
-                subtitle: const Text('Update server URL or credentials', style: TextStyle(fontSize: 12)),
-                onTap: _editConnection,
-              ),
+              if (!isLocked)
+                ListTile(
+                  leading: const Icon(Icons.edit_rounded, color: Colors.white70),
+                  title: const Text('Edit Connection'),
+                  subtitle: const Text('Update server URL or credentials', style: TextStyle(fontSize: 12)),
+                  onTap: _editConnection,
+                ),
 
               ListTile(
                 leading: const Icon(Icons.check_circle_outline, color: Colors.white70),
@@ -706,12 +763,13 @@ class _ManagePlaylistDialogState extends ConsumerState<_ManagePlaylistDialog> {
                 onTap: _setAsStartup,
               ),
 
-              ListTile(
-                leading: const Icon(Icons.delete_outline_rounded, color: Colors.redAccent),
-                title: const Text('Remove Playlist', style: TextStyle(color: Colors.redAccent)),
-                subtitle: const Text('Delete channels (license unaffected)', style: TextStyle(fontSize: 12, color: Colors.redAccent)),
-                onTap: _confirmRemove,
-              ),
+              if (!isLocked)
+                ListTile(
+                  leading: const Icon(Icons.delete_outline_rounded, color: Colors.redAccent),
+                  title: const Text('Remove Playlist', style: TextStyle(color: Colors.redAccent)),
+                  subtitle: const Text('Delete channels (license unaffected)', style: TextStyle(fontSize: 12, color: Colors.redAccent)),
+                  onTap: _confirmRemove,
+                ),
             ],
           ),
         ),

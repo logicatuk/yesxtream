@@ -133,6 +133,7 @@ class _ProviderCard extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     const accent = Color(0xFF6C5CE7);
     final isXtream = provider.type == 'xtream';
+    final isLocked = ref.watch(deviceEntitlementProvider).lockedProviderIds.contains(provider.id);
 
     return Focus(
       onKeyEvent: (node, event) {
@@ -221,60 +222,70 @@ class _ProviderCard extends ConsumerWidget {
                 }
               },
             ),
-            IconButton(
-              icon: const Icon(Icons.delete_outline_rounded,
-                  size: 20, color: Colors.redAccent),
-              tooltip: 'Delete',
-              onPressed: () async {
-                final confirmed = await showDialog<bool>(
-                  context: context,
-                  builder: (_) => AlertDialog(
-                    backgroundColor: const Color(0xFF1A1A2E),
-                    title: Row(
-                      children: [
-                        const Icon(Icons.delete_outline_rounded, color: Colors.redAccent),
-                        const SizedBox(width: 8),
-                        Text(provider.name),
+            if (isLocked)
+              const Tooltip(
+                message: 'Locked by reseller',
+                child: Padding(
+                  padding: EdgeInsets.all(8.0),
+                  child: Icon(Icons.lock_rounded, size: 20, color: Color(0xFFFAB1A0)),
+                ),
+              )
+            else
+              IconButton(
+                icon: const Icon(Icons.delete_outline_rounded,
+                    size: 20, color: Colors.redAccent),
+                tooltip: 'Delete',
+                onPressed: () async {
+                  final confirmed = await showDialog<bool>(
+                    context: context,
+                    builder: (_) => AlertDialog(
+                      backgroundColor: const Color(0xFF1A1A2E),
+                      title: Row(
+                        children: [
+                          const Icon(Icons.delete_outline_rounded, color: Colors.redAccent),
+                          const SizedBox(width: 8),
+                          Text(provider.name),
+                        ],
+                      ),
+                      actions: [
+                        IconButton(
+                          icon: const Icon(Icons.close),
+                          onPressed: () => Navigator.pop(context, false),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.delete_forever, color: Colors.redAccent),
+                          onPressed: () => Navigator.pop(context, true),
+                        ),
                       ],
                     ),
-                    actions: [
-                      IconButton(
-                        icon: const Icon(Icons.close),
-                        onPressed: () => Navigator.pop(context, false),
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.delete_forever, color: Colors.redAccent),
-                        onPressed: () => Navigator.pop(context, true),
-                      ),
-                    ],
-                  ),
-                );
-                if (confirmed == true) {
-                  try {
-                    final manager = ref.read(providerManagerProvider);
-                    await manager.deleteProvider(provider.id);
-                    await ref.read(activePlaylistIdProvider.notifier).clearIfDeleted(provider.id);
-                    ref.invalidate(allPlaylistsProvider);
-                    ref.invalidate(activePlaylistStatsProvider);
-                    ref.invalidate(activePlaylistAccountInfoProvider);
-                    if (context.mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Provider deleted')),
-                      );
-                    }
-                  } catch (e) {
-                    if (context.mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          backgroundColor: Colors.redAccent,
-                          content: Text('Failed to delete provider: $e'),
-                        ),
-                      );
+                  );
+                  if (confirmed == true) {
+                    try {
+                      final manager = ref.read(providerManagerProvider);
+                      await manager.deleteProvider(provider.id);
+                      await ref.read(deviceEntitlementProvider.notifier).deleteRemotePlaylistFromCloud(provider.id);
+                      await ref.read(activePlaylistIdProvider.notifier).clearIfDeleted(provider.id);
+                      ref.invalidate(allPlaylistsProvider);
+                      ref.invalidate(activePlaylistStatsProvider);
+                      ref.invalidate(activePlaylistAccountInfoProvider);
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Provider deleted')),
+                        );
+                      }
+                    } catch (e) {
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            backgroundColor: Colors.redAccent,
+                            content: Text('Failed to delete provider: $e'),
+                          ),
+                        );
+                      }
                     }
                   }
-                }
-              },
-            ),
+                },
+              ),
           ],
         ),
       ),

@@ -148,7 +148,12 @@ class _AddProviderPageState extends ConsumerState<_AddProviderPage> {
 
   void _selectType(_ProviderType type) {
     if (_loading || _type == type) return;
-    setState(() => _type = type);
+    FocusManager.instance.primaryFocus?.unfocus();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        setState(() => _type = type);
+      }
+    });
   }
 
   Future<void> _submit() async {
@@ -202,7 +207,7 @@ class _AddProviderPageState extends ConsumerState<_AddProviderPage> {
     });
     try {
       await action();
-      ref.read(deviceEntitlementProvider.notifier).pushLocalPlaylistsToCloud().catchError((_) {});
+      await ref.read(deviceEntitlementProvider.notifier).pushLocalPlaylistsToCloud();
       await ref.read(activePlaylistIdProvider.notifier).selectPlaylist(newId);
       ref.invalidate(activePlaylistStatsProvider);
       ref.invalidate(activePlaylistHasMoviesProvider);

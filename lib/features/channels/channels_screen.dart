@@ -683,6 +683,9 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
     _longPressTimer?.cancel();
     _focusSelectTimer?.cancel();
     _focusNode.dispose();
+    if (PlatformInfo.isTV) {
+      _liveCache = null;
+    }
     super.dispose();
   }
 
@@ -2325,6 +2328,9 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
                                     width: 26,
                                     height: 18,
                                     fit: BoxFit.contain,
+                                    cacheWidth: 64,
+                                    cacheHeight: 64,
+                                    filterQuality: FilterQuality.low,
                                     errorBuilder: (_, __, ___) => const Icon(Icons.tv_rounded, size: 16, color: Colors.white54),
                                   ),
                                 ),
@@ -4324,28 +4330,26 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
     }
 
     final rowHeight = _isTvNav ? 54.0 : 44.0;
-    final listWidget = ListView.builder(
-      controller: _channelListController,
-      padding: EdgeInsets.zero,
-      cacheExtent: _isTvNav ? 480 : 400,
-      itemExtent: failoverGroupWidgets.isEmpty ? rowHeight : null,
-      itemCount: _filteredChannels.length + (failoverGroupWidgets.isNotEmpty ? failoverGroupWidgets.length + 1 : 0),
-      itemBuilder: (context, index) {
-        // Inject failover group rows at the top
-        if (failoverGroupWidgets.isNotEmpty) {
-          if (index < failoverGroupWidgets.length) {
-            return failoverGroupWidgets[index];
-          }
-          if (index == failoverGroupWidgets.length) {
-            return const Divider(color: Colors.white12, height: 16);
-          }
-          index = index - failoverGroupWidgets.length - 1;
-        }
-        final channel = _filteredChannels[index];
-        final isSelected = index == _selectedIndex;
-        final isFavorited = _favoritedChannelIds.contains(channel.id);
+    final listWidget = Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (failoverGroupWidgets.isNotEmpty) ...[
+          ...failoverGroupWidgets,
+          const Divider(color: Colors.white12, height: 16),
+        ],
+        Expanded(
+          child: ListView.builder(
+            controller: _channelListController,
+            padding: EdgeInsets.zero,
+            cacheExtent: _isTvNav ? 220 : 400,
+            itemExtent: rowHeight,
+            itemCount: _filteredChannels.length,
+            itemBuilder: (context, index) {
+              final channel = _filteredChannels[index];
+              final isSelected = index == _selectedIndex;
+              final isFavorited = _favoritedChannelIds.contains(channel.id);
 
-        return RepaintBoundary(
+              return RepaintBoundary(
           child: Material(
             color: Colors.transparent,
             child: GestureDetector(
@@ -4570,6 +4574,9 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
           ),
         );
       },
+    ),
+    ),
+    ],
     );
 
     return Column(
@@ -4752,6 +4759,7 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
                         borderRadius: BorderRadius.circular(4),
                         child: primary.tvgLogo != null && primary.tvgLogo!.isNotEmpty
                             ? Image.network(primary.tvgLogo!, width: 28, height: 28, fit: BoxFit.contain,
+                                cacheWidth: 64, cacheHeight: 64, filterQuality: FilterQuality.low,
                                 errorBuilder: (_, __, ___) => Container(width: 28, height: 28, color: const Color(0xFF16213E),
                                     child: const Icon(Icons.bolt, size: 14, color: Colors.amber)))
                             : Container(width: 28, height: 28, color: const Color(0xFF16213E),
@@ -5230,6 +5238,9 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
                         ? Image.network(
                             primary.tvgLogo!,
                             fit: BoxFit.cover,
+                            cacheWidth: 72,
+                            cacheHeight: 72,
+                            filterQuality: FilterQuality.low,
                             errorBuilder: (_, __, ___) => Container(
                               color: const Color(0xFF16213E),
                               child: const Icon(Icons.bolt, size: 18, color: Colors.amber),
@@ -5369,6 +5380,7 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
                           width: 24, height: 24,
                           child: ch.tvgLogo != null && ch.tvgLogo!.isNotEmpty
                               ? Image.network(ch.tvgLogo!, fit: BoxFit.cover,
+                                  cacheWidth: 48, cacheHeight: 48, filterQuality: FilterQuality.low,
                                   errorBuilder: (_, __, ___) => const Icon(Icons.tv, size: 14, color: Colors.white24))
                               : const Icon(Icons.tv, size: 14, color: Colors.white24),
                         ),
@@ -6486,6 +6498,7 @@ class _ChannelsScreenState extends ConsumerState<ChannelsScreen> {
                                             ? Image.network(
                                                 channel.tvgLogo!,
                                                 width: 28, height: 28, fit: BoxFit.contain,
+                                                cacheWidth: 64, cacheHeight: 64, filterQuality: FilterQuality.low,
                                                 errorBuilder: (_, __, ___) => Container(
                                                   width: 28, height: 28,
                                                   color: const Color(0xFF16213E),

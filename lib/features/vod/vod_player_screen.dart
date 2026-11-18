@@ -131,7 +131,7 @@ class _VodPlayerScreenState extends ConsumerState<VodPlayerScreen> {
         await np.setProperty('audio-normalize-downmix', 'yes');
         if (useHwAcc) {
           if (defaultTargetPlatform == TargetPlatform.android) {
-            await np.setProperty('hwdec', 'mediacodec-copy');
+            await np.setProperty('hwdec', 'mediacodec');
           } else if (defaultTargetPlatform == TargetPlatform.macOS) {
             await np.setProperty('hwdec', 'auto-safe');
           }

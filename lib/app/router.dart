@@ -25,11 +25,11 @@ import '../features/vod/vod_player_screen.dart';
 final rootNavigatorKey = GlobalKey<NavigatorState>(debugLabel: 'root');
 final shellNavigatorKey = GlobalKey<NavigatorState>(debugLabel: 'shell');
 
-Page<void> _buildShellPage(GoRouterState state, Widget child) {
+Page<void> _buildShellPage(GoRouterState state, Widget child, {LocalKey? key}) {
   if (PlatformInfo.isTV) {
-    return NoTransitionPage<void>(key: state.pageKey, child: child);
+    return NoTransitionPage<void>(key: key ?? state.pageKey, child: child);
   }
-  return MaterialPage<void>(key: state.pageKey, child: child);
+  return MaterialPage<void>(key: key ?? state.pageKey, child: child);
 }
 
 GoRouter createRouter() {
@@ -120,9 +120,10 @@ GoRouter createRouter() {
     GoRoute(
       parentNavigatorKey: rootNavigatorKey,
       path: '/splash',
-      pageBuilder: (context, state) => MaterialPage(
+      pageBuilder: (context, state) => _buildShellPage(
+        state,
+        const SplashScreen(),
         key: UniqueKey(),
-        child: const SplashScreen(),
       ),
     ),
     GoRoute(
@@ -130,9 +131,9 @@ GoRouter createRouter() {
       path: '/player',
       pageBuilder: (context, state) {
         final extra = state.extra as Map<String, dynamic>? ?? {};
-        return MaterialPage(
-          key: UniqueKey(),
-          child: PlayerScreen(
+        return _buildShellPage(
+          state,
+          PlayerScreen(
             streamUrl: extra['streamUrl'] as String? ?? '',
             channelName: extra['channelName'] as String? ?? '',
             channelLogo: extra['channelLogo'] as String?,
@@ -145,6 +146,7 @@ GoRouter createRouter() {
             currentIndex: extra['currentIndex'] as int? ?? 0,
             stopOnExit: extra['stopOnExit'] as bool?,
           ),
+          key: UniqueKey(),
         );
       },
     ),
@@ -153,9 +155,9 @@ GoRouter createRouter() {
       path: '/vod-player',
       pageBuilder: (context, state) {
         final extra = state.extra as Map<String, dynamic>? ?? {};
-        return MaterialPage(
-          key: UniqueKey(),
-          child: VodPlayerScreen(
+        return _buildShellPage(
+          state,
+          VodPlayerScreen(
             id: extra['id'] as String? ?? '',
             title: extra['title'] as String? ?? '',
             streamUrl: extra['streamUrl'] as String? ?? '',
@@ -169,6 +171,7 @@ GoRouter createRouter() {
             nextEpisode: extra['nextEpisode'] as Map<String, dynamic>?,
             initialPositionMs: (extra['initialPositionMs'] as int?) ?? (extra['position'] as int?) ?? 0,
           ),
+          key: UniqueKey(),
         );
       },
     ),
@@ -177,9 +180,10 @@ GoRouter createRouter() {
       path: '/movies/detail',
       pageBuilder: (context, state) {
         if (state.extra is db.Channel) {
-          return MaterialPage(
+          return _buildShellPage(
+            state,
+            MovieDetailScreen(movie: state.extra as db.Channel),
             key: UniqueKey(),
-            child: MovieDetailScreen(movie: state.extra as db.Channel),
           );
         }
         final extra = state.extra as Map<String, dynamic>? ?? {};
@@ -194,9 +198,10 @@ GoRouter createRouter() {
           hidden: false,
           sortOrder: 0,
         );
-        return MaterialPage(
+        return _buildShellPage(
+          state,
+          MovieDetailScreen(movie: movie),
           key: UniqueKey(),
-          child: MovieDetailScreen(movie: movie),
         );
       },
     ),
@@ -205,9 +210,10 @@ GoRouter createRouter() {
       path: '/series/detail',
       pageBuilder: (context, state) {
         if (state.extra is db.Channel) {
-          return MaterialPage(
+          return _buildShellPage(
+            state,
+            SeriesDetailScreen(series: state.extra as db.Channel),
             key: UniqueKey(),
-            child: SeriesDetailScreen(series: state.extra as db.Channel),
           );
         }
         final extra = state.extra as Map<String, dynamic>? ?? {};
@@ -222,9 +228,10 @@ GoRouter createRouter() {
           hidden: false,
           sortOrder: 0,
         );
-        return MaterialPage(
+        return _buildShellPage(
+          state,
+          SeriesDetailScreen(series: series),
           key: UniqueKey(),
-          child: SeriesDetailScreen(series: series),
         );
       },
     ),

@@ -98,8 +98,14 @@ class PlayerService {
         await np.setProperty('audio-channels', 'stereo');
         // Normalize volume when downmixing surround to stereo
         await np.setProperty('audio-normalize-downmix', 'yes');
-        // EBU R128 loudness normalization — keeps volume consistent across streams
-        await np.setProperty('af', 'loudnorm=I=-14:TP=-1:LRA=13');
+        // EBU R128 loudness normalization — opt-in to avoid heavy CPU filter on TV
+        final prefs = await SharedPreferences.getInstance();
+        final loudnormEnabled = prefs.getBool('setting_loudnorm') ?? false;
+        if (loudnormEnabled) {
+          await np.setProperty('af', 'loudnorm=I=-14:TP=-1:LRA=13');
+        } else {
+          await np.setProperty('af', '');
+        }
         // Disable SPDIF passthrough which can cause silent output
         await np.setProperty('audio-spdif', '');
         await np.setProperty('user-agent', 'IPTVSmartersPro/1.0.0 (Linux; Android 12)');
@@ -107,12 +113,11 @@ class PlayerService {
         // Volume
         await np.setProperty('volume', '100');
         await np.setProperty('mute', 'no');
-        // Hardware decoding and buffering
-        final prefs = await SharedPreferences.getInstance();
+        // Hardware decoding (zero-copy mediacodec on Android/Fire TV)
         final hwAcc = prefs.getBool('setting_hardware_acc') ?? true;
         if (hwAcc) {
           if (defaultTargetPlatform == TargetPlatform.android) {
-            await np.setProperty('hwdec', 'mediacodec-copy');
+            await np.setProperty('hwdec', 'mediacodec');
           } else {
             await np.setProperty('hwdec', 'auto-safe');
           }
@@ -133,7 +138,7 @@ class PlayerService {
         final np = player.platform as dynamic;
         if (enabled) {
           if (defaultTargetPlatform == TargetPlatform.android) {
-            await np.setProperty('hwdec', 'mediacodec-copy');
+            await np.setProperty('hwdec', 'mediacodec');
           } else {
             await np.setProperty('hwdec', 'auto-safe');
           }
@@ -459,14 +464,14 @@ class PlayerService {
     );
     ActivePlayerRegistry.register(_warmPlayer!);
 
-    // Configure warm player: muted, with loudnorm, no video output
+    // Configure warm player: muted, no video output
     if (!kIsWeb) {
       try {
         final np = _warmPlayer!.platform as dynamic;
         np.setProperty('vid', 'no'); // disable video decoding
         np.setProperty('audio-channels', 'stereo');
         np.setProperty('audio-normalize-downmix', 'yes');
-        np.setProperty('af', 'loudnorm=I=-14:TP=-1:LRA=13');
+        np.setProperty('af', '');
         np.setProperty('volume', '0'); // silent
       } catch (_) {}
     }
