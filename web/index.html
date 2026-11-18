@@ -216,18 +216,21 @@
 
       var ARROW_KEYS = { ArrowUp: 1, ArrowDown: 1, ArrowLeft: 1, ArrowRight: 1 };
       var lastArrowAt = 0;
-      var ARROW_GAP_MS = 115;
+      var ARROW_GAP_MS = 65;
 
       var dispatchingMapped = false;
+      var cachedFlutterView = null;
 
       function resolveKeyTarget() {
         var active = document.activeElement;
         if (!active || active === document.body || active.tagName === 'VIDEO') {
-          var fv = document.querySelector('flutter-view') || document.querySelector('flt-glass-pane');
-          if (fv && typeof fv.focus === 'function') {
-            try { fv.focus({ preventScroll: true }); } catch (_) {}
+          if (!cachedFlutterView || !cachedFlutterView.isConnected) {
+            cachedFlutterView = document.querySelector('flutter-view') || document.querySelector('flt-glass-pane');
           }
-          return fv || document.body || window;
+          if (cachedFlutterView && typeof cachedFlutterView.focus === 'function') {
+            try { cachedFlutterView.focus({ preventScroll: true }); } catch (_) {}
+          }
+          return cachedFlutterView || document.body || window;
         }
         return active;
       }
