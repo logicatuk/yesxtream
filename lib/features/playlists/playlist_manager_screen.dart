@@ -1,9 +1,13 @@
 import 'package:drift/drift.dart' show Value;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 import '../../data/datasources/local/database.dart' as db;
+import '../../data/services/device_identity_service.dart';
+import '../../data/services/device_sync_service.dart';
 import '../providers/add_provider_dialog.dart';
 import '../providers/provider_manager.dart';
 import 'playlist_providers.dart';
@@ -15,6 +19,13 @@ class PlaylistManagerScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final playlistsAsync = ref.watch(allPlaylistsProvider);
     final activePlaylist = ref.watch(activePlaylistProvider);
+    final identityAsync = ref.watch(deviceIdentityProvider);
+    final entitlement = ref.watch(deviceEntitlementProvider);
+    final identity = identityAsync.value;
+    final isRegistered = identity?.serverRegistered == true && identity?.deviceKey != null;
+    final macAddress = identity?.macAddress ?? 'Loading…';
+    final deviceKey = identity?.deviceKey;
+    final portalUrl = identity?.portalLoginUrl ?? entitlement.portalLoginUrl;
 
     return Scaffold(
       backgroundColor: const Color(0xFF0A0A0F),
@@ -24,6 +35,26 @@ class PlaylistManagerScreen extends ConsumerWidget {
           style: TextStyle(fontWeight: FontWeight.bold),
         ),
         actions: [
+          IconButton(
+            tooltip: 'Sync Cloud Playlists',
+            icon: entitlement.isSyncing
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                  )
+                : const Icon(Icons.sync_rounded),
+            onPressed: entitlement.isSyncing
+                ? null
+                : () async {
+                    await ref.read(deviceEntitlementProvider.notifier).sync();
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Cloud playlists synchronized')),
+                      );
+                    }
+                  },
+          ),
           FilledButton.icon(
             onPressed: () => showAddProviderDialog(context),
             style: FilledButton.styleFrom(
@@ -44,42 +75,266 @@ class PlaylistManagerScreen extends ConsumerWidget {
         ),
         data: (playlists) {
           if (playlists.isEmpty) {
+            final hasValidKey = isRegistered && deviceKey != null && portalUrl != null && portalUrl.isNotEmpty;
+
             return Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(Icons.playlist_remove_rounded,
-                      size: 64, color: Colors.white24),
-                  const SizedBox(height: 16),
-                  const Text(
-                    'No playlists found',
-                    style: TextStyle(fontSize: 18, color: Colors.white70),
-                  ),
-                  const SizedBox(height: 8),
-                  const Text(
-                    'Add an IPTV login or M3U playlist to start watching',
-                    style: TextStyle(fontSize: 14, color: Colors.white38),
-                  ),
-                  const SizedBox(height: 20),
-                  FilledButton.icon(
-                    onPressed: () => showAddProviderDialog(context),
-                    style: FilledButton.styleFrom(
-                      backgroundColor: const Color(0xFF6C5CE7),
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(24),
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 720),
+                  child: Container(
+                    padding: const EdgeInsets.all(24),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF13111C),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                        color: hasValidKey ? const Color(0xFF26243A) : const Color(0xFFE17055).withValues(alpha: 0.4),
+                      ),
                     ),
-                    icon: const Icon(Icons.add),
-                    label: const Text('Add Playlist'),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (hasValidKey) ...[
+                          Container(
+                            padding: const EdgeInsets.all(10),
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: SizedBox(
+                              width: 140,
+                              height: 140,
+                              child: CustomPaint(
+                                painter: QrPainter(
+                                  data: portalUrl,
+                                  version: QrVersions.auto,
+                                  eyeStyle: const QrEyeStyle(
+                                    eyeShape: QrEyeShape.square,
+                                    color: Color(0xFF000000),
+                                  ),
+                                  dataModuleStyle: const QrDataModuleStyle(
+                                    dataModuleShape: QrDataModuleShape.square,
+                                    color: Color(0xFF000000),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 18),
+                          const Text(
+                            'No Playlists Found',
+                            style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white),
+                          ),
+                          const SizedBox(height: 8),
+                          const Text(
+                            'Scan the QR code with your phone to upload an M3U or Xtream playlist through the customer portal, or add one locally below.',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(fontSize: 14, color: Colors.white60, height: 1.4),
+                          ),
+                          const SizedBox(height: 16),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF1B1829),
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(color: const Color(0xFF2E2B44)),
+                            ),
+                            child: Wrap(
+                              spacing: 16,
+                              runSpacing: 6,
+                              alignment: WrapAlignment.center,
+                              children: [
+                                Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Text('MAC: $macAddress',
+                                        style: const TextStyle(
+                                            color: Colors.white, fontFamily: 'monospace', fontWeight: FontWeight.bold)),
+                                    const SizedBox(width: 4),
+                                    InkWell(
+                                      onTap: () {
+                                        Clipboard.setData(ClipboardData(text: macAddress));
+                                        ScaffoldMessenger.of(context).showSnackBar(
+                                          SnackBar(content: Text('MAC copied: $macAddress')),
+                                        );
+                                      },
+                                      borderRadius: BorderRadius.circular(6),
+                                      child: const Padding(
+                                        padding: EdgeInsets.all(4),
+                                        child: Icon(Icons.copy_rounded, size: 15, color: Colors.white60),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Text('KEY: $deviceKey',
+                                        style: const TextStyle(
+                                            color: Color(0xFFA29BFE),
+                                            fontFamily: 'monospace',
+                                            fontWeight: FontWeight.bold)),
+                                    const SizedBox(width: 4),
+                                    InkWell(
+                                      onTap: () {
+                                        Clipboard.setData(ClipboardData(text: deviceKey!));
+                                        ScaffoldMessenger.of(context).showSnackBar(
+                                          SnackBar(content: Text('Device key copied: $deviceKey')),
+                                        );
+                                      },
+                                      borderRadius: BorderRadius.circular(6),
+                                      child: const Padding(
+                                        padding: EdgeInsets.all(4),
+                                        child: Icon(Icons.copy_rounded, size: 15, color: Color(0xFFA29BFE)),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 24),
+                          Wrap(
+                            spacing: 12,
+                            runSpacing: 10,
+                            alignment: WrapAlignment.center,
+                            children: [
+                              FilledButton.icon(
+                                onPressed: () => ref.read(deviceEntitlementProvider.notifier).sync(),
+                                style: FilledButton.styleFrom(
+                                  backgroundColor: const Color(0xFF6C5CE7),
+                                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                                ),
+                                icon: const Icon(Icons.sync_rounded, size: 18),
+                                label: const Text('Sync Cloud Playlists'),
+                              ),
+                              OutlinedButton.icon(
+                                onPressed: () => showAddProviderDialog(context),
+                                style: OutlinedButton.styleFrom(
+                                  foregroundColor: Colors.white,
+                                  side: const BorderSide(color: Color(0xFF38354D)),
+                                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                                ),
+                                icon: const Icon(Icons.add, size: 18),
+                                label: const Text('Add Local Playlist'),
+                              ),
+                            ],
+                          ),
+                        ] else ...[
+                          const Icon(Icons.cloud_off_rounded, size: 52, color: Color(0xFFFFA07A)),
+                          const SizedBox(height: 14),
+                          const Text(
+                            'Not Synced with Server Yet',
+                            style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            'Connecting to Yestream server to verify device and generate your verified key.\nMAC: $macAddress',
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(fontSize: 14, color: Colors.white60, height: 1.4),
+                          ),
+                          const SizedBox(height: 22),
+                          Wrap(
+                            spacing: 12,
+                            runSpacing: 10,
+                            alignment: WrapAlignment.center,
+                            children: [
+                              FilledButton.icon(
+                                onPressed: () async {
+                                  ref.invalidate(deviceIdentityProvider);
+                                  await ref.read(deviceEntitlementProvider.notifier).sync();
+                                },
+                                style: FilledButton.styleFrom(
+                                  backgroundColor: const Color(0xFF6C5CE7),
+                                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                                ),
+                                icon: const Icon(Icons.refresh_rounded, size: 18),
+                                label: const Text('Retry Connection'),
+                              ),
+                              OutlinedButton.icon(
+                                onPressed: () => showAddProviderDialog(context),
+                                style: OutlinedButton.styleFrom(
+                                  foregroundColor: Colors.white,
+                                  side: const BorderSide(color: Color(0xFF38354D)),
+                                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                                ),
+                                icon: const Icon(Icons.add, size: 18),
+                                label: const Text('Add Local Playlist'),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ],
+                    ),
                   ),
-                ],
+                ),
               ),
             );
           }
 
           return ListView.separated(
             padding: const EdgeInsets.all(20),
-            itemCount: playlists.length,
+            itemCount: playlists.length + 1,
             separatorBuilder: (_, __) => const SizedBox(height: 12),
             itemBuilder: (context, index) {
-              final playlist = playlists[index];
+              if (index == 0) {
+                // Cloud Sync header banner
+                return Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF13111C),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: const Color(0xFF26243A)),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.cloud_done_rounded, color: Color(0xFF6C5CE7), size: 22),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Device: $macAddress',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontFamily: 'monospace',
+                                fontSize: 13,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            Text(
+                              entitlement.formattedStatusBadge,
+                              style: TextStyle(
+                                color: entitlement.isActive
+                                    ? Colors.greenAccent
+                                    : (entitlement.isExpired ? Colors.redAccent : Colors.amberAccent),
+                                fontSize: 12,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      TextButton.icon(
+                        onPressed: entitlement.isSyncing
+                            ? null
+                            : () => ref.read(deviceEntitlementProvider.notifier).sync(),
+                        icon: entitlement.isSyncing
+                            ? const SizedBox(
+                                width: 14,
+                                height: 14,
+                                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                              )
+                            : const Icon(Icons.sync_rounded, size: 16),
+                        label: Text(entitlement.isSyncing ? 'Syncing' : 'Sync'),
+                        style: TextButton.styleFrom(foregroundColor: const Color(0xFFA29BFE)),
+                      ),
+                    ],
+                  ),
+                );
+              }
+
+              final playlist = playlists[index - 1];
               final isActive = activePlaylist?.id == playlist.id;
 
               return _PlaylistCard(
@@ -363,6 +618,7 @@ class _ManagePlaylistDialogState extends ConsumerState<_ManagePlaylistDialog> {
       try {
         final manager = ref.read(providerManagerProvider);
         await manager.deleteProvider(widget.playlist.id);
+        ref.read(deviceEntitlementProvider.notifier).pushLocalPlaylistsToCloud().catchError((_) {});
         await ref.read(activePlaylistIdProvider.notifier).clearIfDeleted(widget.playlist.id);
         ref.invalidate(allPlaylistsProvider);
         ref.invalidate(activePlaylistStatsProvider);

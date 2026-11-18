@@ -94,6 +94,12 @@ void main() {
     await tester.pump();
     expect(find.text('Required'), findsNWidgets(4));
 
+    // Switch to QR Code tab via tap/selection.
+    await tester.tap(find.text('QR Code / Mobile'));
+    await tester.pumpAndSettle();
+    expect(find.text('QR Code / Mobile Upload'), findsOneWidget);
+    expect(find.text('Sync Cloud Playlists'), findsOneWidget);
+
     // Escape closes the route back to opener.
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pumpAndSettle();

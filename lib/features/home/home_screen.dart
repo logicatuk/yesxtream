@@ -12,6 +12,8 @@ import '../../core/tv_exit_helper.dart';
 import '../../data/datasources/local/database.dart' as db;
 import '../../data/services/app_settings.dart';
 import '../../data/services/app_update_service.dart';
+import '../../data/services/device_identity_service.dart';
+import '../../data/services/device_sync_service.dart';
 import '../playlists/playlist_providers.dart';
 import '../providers/add_provider_dialog.dart';
 import '../providers/provider_manager.dart';
@@ -769,12 +771,27 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         ? DateFormat('dd/MM/yyyy HH:mm').format(info!.expDate!)
         : 'Unlimited';
 
+    final identity = ref.read(deviceIdentityProvider).value;
+    final entitlement = ref.read(deviceEntitlementProvider);
+    final isRegistered = identity?.serverRegistered == true && identity?.deviceKey != null;
+    final mac = identity?.macAddress ?? '—';
+    final key = isRegistered ? identity!.deviceKey! : 'Not synced';
+    final licenseStatus = isRegistered ? entitlement.formattedStatusBadge : 'Not synced with server';
+    final licenseExpiry = entitlement.expiresAt != null
+        ? DateFormat('dd/MM/yyyy').format(entitlement.expiresAt!)
+        : (entitlement.trialEndsAt != null
+            ? DateFormat('dd/MM/yyyy').format(entitlement.trialEndsAt!)
+            : 'Unlimited');
+
     showDialog(
       context: context,
       builder: (ctx) => Dialog(
         backgroundColor: Colors.transparent,
         child: Container(
           width: 440,
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.sizeOf(context).height * 0.9,
+          ),
           padding: const EdgeInsets.all(24),
           decoration: BoxDecoration(
             color: const Color(0xFF121124),
@@ -790,107 +807,143 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               ),
             ],
           ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Container(
-                    width: 38,
-                    height: 38,
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF6C5CE7).withValues(alpha: 0.2),
-                      shape: BoxShape.circle,
-                    ),
-                    child: const Icon(
-                      Icons.account_circle_outlined,
-                      color: Color(0xFF6C5CE7),
-                      size: 24,
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Text(
-                      settings.tr('account_details'),
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      width: 38,
+                      height: 38,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF6C5CE7).withValues(alpha: 0.2),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(
+                        Icons.account_circle_outlined,
+                        color: Color(0xFF6C5CE7),
+                        size: 24,
                       ),
                     ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        settings.tr('account_details'),
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close_rounded, color: Colors.white60),
+                      onPressed: () => Navigator.of(ctx).pop(),
+                    ),
+                  ],
+                ),
+                const Divider(color: Color(0xFF22203A), height: 28),
+
+                _buildInfoRow(
+                  'Profile',
+                  playlist.name,
+                ),
+                _buildInfoRow(
+                  'Type',
+                  playlist.type.toUpperCase(),
+                ),
+                if (playlist.username != null && playlist.username!.isNotEmpty)
+                  _buildInfoRow(
+                    'Username',
+                    playlist.username!,
                   ),
-                  IconButton(
-                    icon: const Icon(Icons.close_rounded, color: Colors.white60),
+                _buildInfoRow(
+                  settings.tr('account_status'),
+                  info?.status ?? settings.tr('account_active'),
+                  valueColor: const Color(0xFF00B894),
+                ),
+                _buildInfoRow(
+                  settings.tr('account_expires'),
+                  expiryFormatted,
+                  valueColor: const Color(0xFFA29BFE),
+                ),
+                if (info?.maxConnections != null)
+                  _buildInfoRow(
+                    'Max Connections',
+                    '${info!.maxConnections}',
+                  ),
+
+                const Divider(color: Color(0xFF22203A), height: 24),
+
+                // Device & App License
+                Row(
+                  children: const [
+                    Icon(Icons.devices_rounded, size: 16, color: Color(0xFFA29BFE)),
+                    SizedBox(width: 8),
+                    Text(
+                      'Device & App License',
+                      style: TextStyle(
+                        color: Color(0xFFA29BFE),
+                        fontSize: 13,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 0.5,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                _buildInfoRow('Device MAC', mac),
+                _buildInfoRow('Device Key', key),
+                _buildInfoRow(
+                  'License Status',
+                  licenseStatus,
+                  valueColor: entitlement.isActive
+                      ? const Color(0xFF00B894)
+                      : (entitlement.isExpired ? Colors.redAccent : Colors.amberAccent),
+                ),
+                _buildInfoRow(
+                  'License Expiry',
+                  licenseExpiry,
+                  valueColor: entitlement.isActive ? const Color(0xFF00B894) : Colors.amberAccent,
+                ),
+
+                const Divider(color: Color(0xFF22203A), height: 24),
+
+                // Content stats
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceAround,
+                  children: [
+                    _buildStatPill(settings.tr('live_tv'), '${stats.liveCount}'),
+                    _buildStatPill(settings.tr('movies'), '${stats.moviesCount}'),
+                    _buildStatPill(settings.tr('series'), '${stats.seriesCount}'),
+                  ],
+                ),
+
+                const SizedBox(height: 20),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: FilledButton(
+                    autofocus: true,
                     onPressed: () => Navigator.of(ctx).pop(),
-                  ),
-                ],
-              ),
-              const Divider(color: Color(0xFF22203A), height: 28),
-
-              _buildInfoRow(
-                'Profile',
-                playlist.name,
-              ),
-              _buildInfoRow(
-                'Type',
-                playlist.type.toUpperCase(),
-              ),
-              if (playlist.username != null && playlist.username!.isNotEmpty)
-                _buildInfoRow(
-                  'Username',
-                  playlist.username!,
-                ),
-              _buildInfoRow(
-                settings.tr('account_status'),
-                info?.status ?? settings.tr('account_active'),
-                valueColor: const Color(0xFF00B894),
-              ),
-              _buildInfoRow(
-                settings.tr('account_expires'),
-                expiryFormatted,
-                valueColor: const Color(0xFFA29BFE),
-              ),
-              if (info?.maxConnections != null)
-                _buildInfoRow(
-                  'Max Connections',
-                  '${info!.maxConnections}',
-                ),
-
-              const Divider(color: Color(0xFF22203A), height: 24),
-
-              // Content stats
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceAround,
-                children: [
-                  _buildStatPill(settings.tr('live_tv'), '${stats.liveCount}'),
-                  _buildStatPill(settings.tr('movies'), '${stats.moviesCount}'),
-                  _buildStatPill(settings.tr('series'), '${stats.seriesCount}'),
-                ],
-              ),
-
-              const SizedBox(height: 20),
-              Align(
-                alignment: Alignment.centerRight,
-                child: FilledButton(
-                  autofocus: true,
-                  onPressed: () => Navigator.of(ctx).pop(),
-                  style: FilledButton.styleFrom(
-                    backgroundColor: const Color(0xFF6C5CE7),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: const Color(0xFF6C5CE7),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ).copyWith(
+                      side: WidgetStateProperty.resolveWith(
+                        (states) => states.contains(WidgetState.focused)
+                            ? const BorderSide(color: Colors.white, width: 2.5)
+                            : null,
+                      ),
                     ),
-                  ).copyWith(
-                    side: WidgetStateProperty.resolveWith(
-                      (states) => states.contains(WidgetState.focused)
-                          ? const BorderSide(color: Colors.white, width: 2.5)
-                          : null,
-                    ),
+                    child: const Text('OK'),
                   ),
-                  child: const Text('OK'),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),

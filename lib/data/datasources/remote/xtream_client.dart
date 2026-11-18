@@ -44,8 +44,14 @@ class XtreamClient {
       };
   }
 
-  String get _cleanBaseUrl =>
-      baseUrl.endsWith('/') ? baseUrl.substring(0, baseUrl.length - 1) : baseUrl;
+  String get _cleanBaseUrl {
+    var url = baseUrl.trim();
+    if (!url.toLowerCase().startsWith('http://') &&
+        !url.toLowerCase().startsWith('https://')) {
+      url = 'http://$url';
+    }
+    return url.endsWith('/') ? url.substring(0, url.length - 1) : url;
+  }
 
   String get _apiBase => '$_cleanBaseUrl/player_api.php';
 

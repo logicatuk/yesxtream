@@ -11,16 +11,27 @@ void main() {
       SharedPreferences.setMockInitialValues({});
     });
 
-    test('generates valid virtual MAC (AA:BB:CC:DD:EE:FF) and 6-digit device key', () async {
+    test('generates valid virtual MAC (02:XX:XX:XX:XX:XX) and handles server registration state', () async {
       final identity = await DeviceIdentityService.getIdentity();
 
       final macRegex = RegExp(r'^[0-9A-F]{2}(:[0-9A-F]{2}){5}$');
       expect(macRegex.hasMatch(identity.macAddress), isTrue,
           reason: 'MAC address must match AA:BB:CC:DD:EE:FF format');
+      expect(identity.macAddress.startsWith('02:'), isTrue,
+          reason: 'MAC address must be locally administered (02:XX:XX:XX:XX:XX)');
+    });
 
-      final keyRegex = RegExp(r'^\d{6}$');
-      expect(keyRegex.hasMatch(identity.deviceKey), isTrue,
-          reason: 'Device key must be exactly 6 numeric digits');
+    test('updateServerKeyAndPortalUrl persists genuine 6-digit key and marks registered', () async {
+      final initial = await DeviceIdentityService.getIdentity();
+      await DeviceIdentityService.updateServerKeyAndPortalUrl(
+        key6: '842195',
+        portalUrl: 'https://yestream.ai.studio/customer/login?mac=${initial.macAddress}&key=842195&redirect=/me/playlists',
+      );
+
+      final updated = await DeviceIdentityService.getIdentity();
+      expect(updated.serverRegistered, isTrue);
+      expect(updated.deviceKey, equals('842195'));
+      expect(updated.portalLoginUrl, contains('key=842195'));
     });
 
     test('identity is stable and persisted across multiple calls', () async {

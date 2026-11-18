@@ -29,6 +29,17 @@ import 'package:dio/dio.dart';
   return null;
 }
 
+/// Normalize IPTV URL to ensure it always includes http:// or https://
+String normalizeProviderUrl(String url) {
+  final trimmed = url.trim();
+  if (trimmed.isEmpty) return '';
+  if (!trimmed.toLowerCase().startsWith('http://') &&
+      !trimmed.toLowerCase().startsWith('https://')) {
+    return 'http://$trimmed';
+  }
+  return trimmed;
+}
+
 /// Manages IPTV providers: adding, refreshing, channel loading.
 class ProviderManager {
   final db.AppDatabase _db;
@@ -54,9 +65,10 @@ class ProviderManager {
     required String url,
     void Function(int step, String message)? onProgress,
   }) async {
+    final cleanUrl = normalizeProviderUrl(url);
     await _checkProviderLimit(id);
     // Auto-detect Xtream link disguised as M3U
-    final xtreamCreds = parseXtreamFromM3uUrl(url);
+    final xtreamCreds = parseXtreamFromM3uUrl(cleanUrl);
     if (xtreamCreds != null) {
       return addXtreamProvider(
         id: id,
@@ -72,7 +84,7 @@ class ProviderManager {
       id: id,
       name: name,
       type: 'm3u',
-      url: url,
+      url: cleanUrl,
       username: null,
       password: null,
       sortOrder: 0,
@@ -92,7 +104,7 @@ class ProviderManager {
         id: id,
         name: name,
         type: 'm3u',
-        url: Value(url),
+        url: Value(cleanUrl),
       ),
       providerId: id,
       channels: channels,
@@ -110,13 +122,14 @@ class ProviderManager {
     required String password,
     void Function(int step, String message)? onProgress,
   }) async {
+    final cleanUrl = normalizeProviderUrl(url);
     await _checkProviderLimit(id);
 
     final tempProvider = db.Provider(
       id: id,
       name: name,
       type: 'xtream',
-      url: url,
+      url: cleanUrl,
       username: username,
       password: password,
       sortOrder: 0,
@@ -136,7 +149,7 @@ class ProviderManager {
         id: id,
         name: name,
         type: 'xtream',
-        url: Value(url),
+        url: Value(cleanUrl),
         username: Value(username),
         password: Value(password),
       ),
@@ -325,7 +338,8 @@ class ProviderManager {
       ),
     );
     try {
-      final response = await dio.get<String>(provider.url!);
+      final cleanUrl = normalizeProviderUrl(provider.url ?? '');
+      final response = await dio.get<String>(cleanUrl);
       if (response.statusCode != null && (response.statusCode! < 200 || response.statusCode! >= 300)) {
         throw Exception('Server returned HTTP ${response.statusCode} when loading M3U');
       }
@@ -380,8 +394,9 @@ class ProviderManager {
     db.Provider provider, {
     void Function(int step, String message)? onProgress,
   }) async {
+    final cleanUrl = normalizeProviderUrl(provider.url ?? '');
     final client = XtreamClient(
-      baseUrl: provider.url!,
+      baseUrl: cleanUrl,
       username: provider.username ?? '',
       password: provider.password ?? '',
     );

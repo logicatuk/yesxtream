@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 
 import '../../core/platform_info.dart';
+import '../../data/services/device_identity_service.dart';
+import '../../data/services/device_sync_service.dart';
 import '../playlists/playlist_providers.dart';
 import 'playlist_error.dart';
 import 'provider_manager.dart';
@@ -33,7 +36,7 @@ Future<bool?> showAddProviderDialog(
   );
 }
 
-enum _ProviderType { m3u, xtream }
+enum _ProviderType { m3u, xtream, qr }
 
 class _AddProviderPage extends ConsumerStatefulWidget {
   final String? existingId;
@@ -96,8 +99,9 @@ class _AddProviderPageState extends ConsumerState<_AddProviderPage> {
       _xtreamName.text = widget.initialName!;
     }
     if (widget.initialUrl != null) {
-      _m3uUrl.text = widget.initialUrl!;
-      _xtreamUrl.text = widget.initialUrl!;
+      final normalized = normalizeProviderUrl(widget.initialUrl!);
+      _m3uUrl.text = normalized;
+      _xtreamUrl.text = normalized;
     }
     if (widget.initialUsername != null) {
       _xtreamUser.text = widget.initialUsername!;
@@ -139,10 +143,6 @@ class _AddProviderPageState extends ConsumerState<_AddProviderPage> {
   String? _validateUrl(String? value) {
     final trimmed = value?.trim() ?? '';
     if (trimmed.isEmpty) return 'Required';
-    final lower = trimmed.toLowerCase();
-    if (!lower.startsWith('http://') && !lower.startsWith('https://')) {
-      return 'URL must start with http:// or https://';
-    }
     return null;
   }
 
@@ -152,6 +152,7 @@ class _AddProviderPageState extends ConsumerState<_AddProviderPage> {
   }
 
   Future<void> _submit() async {
+    if (_type == _ProviderType.qr) return;
     if (_loading || !_formKey.currentState!.validate()) return;
     void onProgress(int _, String msg) {
       if (mounted) setState(() => _statusMessage = msg);
@@ -163,22 +164,26 @@ class _AddProviderPageState extends ConsumerState<_AddProviderPage> {
             : _generateId(_xtreamName.text.trim()));
 
     if (_type == _ProviderType.m3u) {
+      final cleanUrl = normalizeProviderUrl(_m3uUrl.text);
+      _m3uUrl.text = cleanUrl;
       await _addProvider(targetId, () {
         final manager = ref.read(providerManagerProvider);
         return manager.addM3uProvider(
           id: targetId,
           name: _m3uName.text.trim(),
-          url: _m3uUrl.text.trim(),
+          url: cleanUrl,
           onProgress: onProgress,
         );
       });
     } else {
+      final cleanUrl = normalizeProviderUrl(_xtreamUrl.text);
+      _xtreamUrl.text = cleanUrl;
       await _addProvider(targetId, () {
         final manager = ref.read(providerManagerProvider);
         return manager.addXtreamProvider(
           id: targetId,
           name: _xtreamName.text.trim(),
-          url: _xtreamUrl.text.trim(),
+          url: cleanUrl,
           username: _xtreamUser.text.trim(),
           password: _xtreamPass.text.trim(),
           onProgress: onProgress,
@@ -197,6 +202,7 @@ class _AddProviderPageState extends ConsumerState<_AddProviderPage> {
     });
     try {
       await action();
+      ref.read(deviceEntitlementProvider.notifier).pushLocalPlaylistsToCloud().catchError((_) {});
       await ref.read(activePlaylistIdProvider.notifier).selectPlaylist(newId);
       ref.invalidate(activePlaylistStatsProvider);
       ref.invalidate(activePlaylistHasMoviesProvider);
@@ -497,6 +503,17 @@ class _AddProviderPageState extends ConsumerState<_AddProviderPage> {
                     enabled: !_loading,
                     onTap: () => _selectType(_ProviderType.xtream),
                   ),
+                  const SizedBox(height: 12),
+                  _SourceModeCard(
+                    title: 'QR Code / Mobile',
+                    subtitle: 'Scan to upload via phone',
+                    badge: 'Cloud',
+                    icon: Icons.qr_code_2_rounded,
+                    selected: _type == _ProviderType.qr,
+                    autofocus: _type == _ProviderType.qr,
+                    enabled: !_loading,
+                    onTap: () => _selectType(_ProviderType.qr),
+                  ),
                   const Spacer(),
                   const SizedBox(height: 20),
                   _buildStatusPanel(),
@@ -519,9 +536,11 @@ class _AddProviderPageState extends ConsumerState<_AddProviderPage> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              _type == _ProviderType.m3u
-                                  ? 'M3U Playlist Details'
-                                  : 'Xtream Codes Login',
+                              _type == _ProviderType.qr
+                                  ? 'QR Code / Mobile Upload'
+                                  : (_type == _ProviderType.m3u
+                                      ? 'M3U Playlist Details'
+                                      : 'Xtream Codes Login'),
                               style: const TextStyle(
                                 fontSize: 20,
                                 fontWeight: FontWeight.w700,
@@ -530,9 +549,11 @@ class _AddProviderPageState extends ConsumerState<_AddProviderPage> {
                             ),
                             const SizedBox(height: 4),
                             Text(
-                              _type == _ProviderType.m3u
-                                  ? 'Import channels and groups from your playlist URL.'
-                                  : 'Connect Live TV, Movies, Series, and EPG guide.',
+                              _type == _ProviderType.qr
+                                  ? 'Scan with your smartphone to upload playlists remotely.'
+                                  : (_type == _ProviderType.m3u
+                                      ? 'Import channels and groups from your playlist URL.'
+                                      : 'Connect Live TV, Movies, Series, and EPG guide.'),
                               style: const TextStyle(
                                 fontSize: 13,
                                 color: Colors.white60,
@@ -583,7 +604,7 @@ class _AddProviderPageState extends ConsumerState<_AddProviderPage> {
                 Expanded(
                   child: _SourceModeCard(
                     title: 'M3U Playlist',
-                    subtitle: 'Direct M3U / M3U+ link',
+                    subtitle: 'Direct link',
                     icon: Icons.link_rounded,
                     compact: true,
                     selected: _type == _ProviderType.m3u,
@@ -592,17 +613,30 @@ class _AddProviderPageState extends ConsumerState<_AddProviderPage> {
                     onTap: () => _selectType(_ProviderType.m3u),
                   ),
                 ),
-                const SizedBox(width: 10),
+                const SizedBox(width: 8),
                 Expanded(
                   child: _SourceModeCard(
                     title: 'Xtream Codes',
-                    subtitle: 'URL, user & password',
+                    subtitle: 'User & pass',
                     icon: Icons.dns_rounded,
                     compact: true,
                     selected: _type == _ProviderType.xtream,
                     autofocus: _type == _ProviderType.xtream,
                     enabled: !_loading,
                     onTap: () => _selectType(_ProviderType.xtream),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _SourceModeCard(
+                    title: 'QR Code',
+                    subtitle: 'Mobile upload',
+                    icon: Icons.qr_code_2_rounded,
+                    compact: true,
+                    selected: _type == _ProviderType.qr,
+                    autofocus: _type == _ProviderType.qr,
+                    enabled: !_loading,
+                    onTap: () => _selectType(_ProviderType.qr),
                   ),
                 ),
               ],
@@ -645,7 +679,7 @@ class _AddProviderPageState extends ConsumerState<_AddProviderPage> {
               onTap: () => _selectType(_ProviderType.m3u),
             ),
           ),
-          const SizedBox(width: 6),
+          const SizedBox(width: 4),
           Expanded(
             child: _buildSegmentedPill(
               label: 'Xtream Codes',
@@ -653,6 +687,16 @@ class _AddProviderPageState extends ConsumerState<_AddProviderPage> {
               selected: _type == _ProviderType.xtream,
               autofocus: _type == _ProviderType.xtream,
               onTap: () => _selectType(_ProviderType.xtream),
+            ),
+          ),
+          const SizedBox(width: 4),
+          Expanded(
+            child: _buildSegmentedPill(
+              label: 'QR Code',
+              icon: Icons.qr_code_2_rounded,
+              selected: _type == _ProviderType.qr,
+              autofocus: _type == _ProviderType.qr,
+              onTap: () => _selectType(_ProviderType.qr),
             ),
           ),
         ],
@@ -847,6 +891,9 @@ class _AddProviderPageState extends ConsumerState<_AddProviderPage> {
   }
 
   Widget _buildActiveForm({required bool sideBySideCredentials}) {
+    if (_type == _ProviderType.qr) {
+      return _buildQrForm();
+    }
     if (_type == _ProviderType.m3u) {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1038,7 +1085,252 @@ class _AddProviderPageState extends ConsumerState<_AddProviderPage> {
     );
   }
 
+  Widget _buildQrForm() {
+    final identityAsync = ref.watch(deviceIdentityProvider);
+    final entitlement = ref.watch(deviceEntitlementProvider);
+    final identity = identityAsync.value;
+    final isRegistered = identity?.serverRegistered == true && identity?.deviceKey != null;
+    final macAddress = identity?.macAddress ?? 'Loading…';
+    final deviceKey = identity?.deviceKey;
+    final portalUrl = identity?.portalLoginUrl ?? entitlement.portalLoginUrl;
+
+    if (!isRegistered || deviceKey == null || portalUrl == null || portalUrl.isEmpty) {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+        decoration: BoxDecoration(
+          color: _inputBg,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: const Color(0xFFE17055).withValues(alpha: 0.45)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.cloud_off_rounded, size: 44, color: Color(0xFFFFA07A)),
+            const SizedBox(height: 12),
+            const Text(
+              'Not Synced with Server Yet',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'Connecting to Yestream server to verify device and generate your verified key.\nMAC: $macAddress',
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 12.5, color: Colors.white60, height: 1.4),
+            ),
+            const SizedBox(height: 16),
+            FilledButton.icon(
+              onPressed: () async {
+                ref.invalidate(deviceIdentityProvider);
+                await ref.read(deviceEntitlementProvider.notifier).sync();
+              },
+              style: FilledButton.styleFrom(
+                backgroundColor: _accent,
+                padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              ),
+              icon: const Icon(Icons.refresh_rounded, size: 17),
+              label: const Text('Retry Connection', style: TextStyle(fontWeight: FontWeight.w700)),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
+      decoration: BoxDecoration(
+        color: _inputBg,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: _borderIdle),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: SizedBox(
+              width: 140,
+              height: 140,
+              child: CustomPaint(
+                painter: QrPainter(
+                  data: portalUrl,
+                  version: QrVersions.auto,
+                  eyeStyle: const QrEyeStyle(
+                    eyeShape: QrEyeShape.square,
+                    color: Color(0xFF000000),
+                  ),
+                  dataModuleStyle: const QrDataModuleStyle(
+                    dataModuleShape: QrDataModuleShape.square,
+                    color: Color(0xFF000000),
+                  ),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 14),
+          const Text(
+            'Scan to Upload via Phone',
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+              color: Colors.white,
+            ),
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            'Point your mobile camera at this QR code to log in and upload your M3U or Xtream playlist directly without typing on TV.',
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 12.5, color: Colors.white60, height: 1.35),
+          ),
+          const SizedBox(height: 14),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+            decoration: BoxDecoration(
+              color: const Color(0xFF131224),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: const Color(0xFF2E2B44)),
+            ),
+            child: Wrap(
+              spacing: 16,
+              runSpacing: 6,
+              alignment: WrapAlignment.center,
+              children: [
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text('MAC: $macAddress',
+                        style: const TextStyle(
+                            color: Colors.white, fontFamily: 'monospace', fontWeight: FontWeight.bold, fontSize: 13)),
+                    const SizedBox(width: 4),
+                    InkWell(
+                      onTap: () {
+                        Clipboard.setData(ClipboardData(text: macAddress));
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text('MAC copied: $macAddress')),
+                        );
+                      },
+                      borderRadius: BorderRadius.circular(6),
+                      child: const Padding(
+                        padding: EdgeInsets.all(4),
+                        child: Icon(Icons.copy_rounded, size: 15, color: Colors.white60),
+                      ),
+                    ),
+                  ],
+                ),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text('KEY: $deviceKey',
+                        style: const TextStyle(
+                            color: Color(0xFFA29BFE), fontFamily: 'monospace', fontWeight: FontWeight.bold, fontSize: 13)),
+                    const SizedBox(width: 4),
+                    InkWell(
+                      onTap: () {
+                        Clipboard.setData(ClipboardData(text: deviceKey));
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text('Device key copied: $deviceKey')),
+                        );
+                      },
+                      borderRadius: BorderRadius.circular(6),
+                      child: const Padding(
+                        padding: EdgeInsets.all(4),
+                        child: Icon(Icons.copy_rounded, size: 15, color: Color(0xFFA29BFE)),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildActionRow({required bool compact}) {
+    if (_type == _ProviderType.qr) {
+      final entitlement = ref.watch(deviceEntitlementProvider);
+      final syncBtn = ConstrainedBox(
+        constraints: const BoxConstraints(minHeight: 52),
+        child: FilledButton.icon(
+          onPressed: entitlement.isSyncing
+              ? null
+              : () async {
+                  await ref.read(deviceEntitlementProvider.notifier).sync();
+                  if (!mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Cloud playlists synchronized')),
+                  );
+                  Navigator.of(context).pop(true);
+                },
+          style: FilledButton.styleFrom(
+            backgroundColor: _accent,
+            foregroundColor: Colors.white,
+            padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 14),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(14),
+            ),
+          ),
+          icon: entitlement.isSyncing
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2.2,
+                    color: Colors.white,
+                  ),
+                )
+              : const Icon(Icons.sync_rounded, size: 20),
+          label: Text(
+            entitlement.isSyncing ? 'Syncing…' : 'Sync Cloud Playlists',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontSize: 15.5, fontWeight: FontWeight.w700),
+          ),
+        ),
+      );
+
+      final closeBtn = ConstrainedBox(
+        constraints: const BoxConstraints(minHeight: 52),
+        child: OutlinedButton(
+          onPressed: () => Navigator.of(context).pop(),
+          style: OutlinedButton.styleFrom(
+            foregroundColor: Colors.white70,
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(14),
+            ),
+          ),
+          child: const Text(
+            'Close',
+            style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w600),
+          ),
+        ),
+      );
+
+      if (compact) {
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            syncBtn,
+            const SizedBox(height: 10),
+            closeBtn,
+          ],
+        );
+      }
+
+      return Row(
+        children: [
+          closeBtn,
+          const SizedBox(width: 12),
+          Expanded(child: syncBtn),
+        ],
+      );
+    }
     final submitBtn = ConstrainedBox(
       constraints: const BoxConstraints(minHeight: 52),
       child: FilledButton.icon(

@@ -4,14 +4,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../../core/countdown_snackbar.dart';
-import '../../data/datasources/local/database.dart' as db;
+import '../../core/platform_info.dart';
 import '../../data/services/app_settings.dart';
 import '../../data/services/app_update_service.dart';
 import '../../data/services/device_identity_service.dart';
+import '../../data/services/device_sync_service.dart';
 import '../../data/services/playback_history_service.dart';
 import '../player/player_service.dart';
-import '../providers/provider_manager.dart';
 
 enum SettingsGroup {
   general('General', Icons.tune_rounded),
@@ -48,6 +47,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   void initState() {
     super.initState();
     _selectedGroup = widget.initialGroup;
+    AppUpdateService.customUpdateUrl =
+        '$kYestreamApiBase/device/updates?platform=${Uri.encodeComponent(PlatformInfo.isTV ? 'Android TV' : 'Android')}&channel=stable&version=${AppUpdateService.currentVersion}';
   }
 
   String _getGroupLabel(SettingsGroup group, AppSettings settings) {
@@ -737,8 +738,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   // ──────────────────────────────
   Widget _buildDeviceLicenseSettings() {
     final identityAsync = ref.watch(deviceIdentityProvider);
-    final macAddress = identityAsync.value?.macAddress ?? 'Loading…';
-    final deviceKey = identityAsync.value?.deviceKey ?? '••••••';
+    final entitlement = ref.watch(deviceEntitlementProvider);
+    final identity = identityAsync.value;
+    final isRegistered = identity?.serverRegistered == true && identity?.deviceKey != null;
+    final macAddress = identity?.macAddress ?? 'Loading…';
+    final deviceKey = identity?.deviceKey;
 
     return ListView(
       padding: const EdgeInsets.all(24),
@@ -778,57 +782,86 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               leading: const Icon(Icons.vpn_key_rounded, color: Colors.white70),
               title: const Text('Device Key', style: TextStyle(color: Colors.white)),
               subtitle: Text(
-                _keyRevealed ? deviceKey : '••••••',
-                style: const TextStyle(
-                  color: Colors.white70,
-                  fontFamily: 'monospace',
-                  fontSize: 18,
+                !isRegistered
+                    ? 'Not synced with server yet'
+                    : (_keyRevealed ? deviceKey! : '••••••'),
+                style: TextStyle(
+                  color: !isRegistered ? const Color(0xFFFFA07A) : Colors.white70,
+                  fontFamily: !isRegistered ? null : 'monospace',
+                  fontSize: !isRegistered ? 13.5 : 18,
                   fontWeight: FontWeight.bold,
-                  letterSpacing: 3.0,
+                  letterSpacing: !isRegistered ? null : 3.0,
                 ),
               ),
               trailing: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  IconButton(
-                    icon: Icon(_keyRevealed ? Icons.visibility_off_rounded : Icons.visibility_rounded,
-                        color: Colors.white54),
-                    onPressed: () => setState(() => _keyRevealed = !_keyRevealed),
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.copy_rounded, color: Colors.white54, size: 20),
-                    tooltip: 'Copy Key',
-                    onPressed: () {
-                      Clipboard.setData(ClipboardData(text: deviceKey));
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Device key copied')),
-                      );
-                    },
-                  ),
+                  if (isRegistered) ...[
+                    IconButton(
+                      icon: Icon(_keyRevealed ? Icons.visibility_off_rounded : Icons.visibility_rounded,
+                          color: Colors.white54),
+                      onPressed: () => setState(() => _keyRevealed = !_keyRevealed),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.copy_rounded, color: Colors.white54, size: 20),
+                      tooltip: 'Copy Key',
+                      onPressed: () {
+                        Clipboard.setData(ClipboardData(text: deviceKey!));
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Device key copied')),
+                        );
+                      },
+                    ),
+                  ] else ...[
+                    TextButton.icon(
+                      icon: const Icon(Icons.refresh_rounded, size: 16),
+                      label: const Text('Retry'),
+                      onPressed: () async {
+                        ref.invalidate(deviceIdentityProvider);
+                        await ref.read(deviceEntitlementProvider.notifier).sync();
+                      },
+                    ),
+                  ],
                 ],
               ),
             ),
             const Divider(color: Color(0xFF26243A), height: 1),
 
             // License Status
-            const ListTile(
-              leading: Icon(Icons.verified_rounded, color: Colors.greenAccent),
-              title: Text('License Status', style: TextStyle(color: Colors.white)),
-              subtitle: Text('Active (Lifetime Unlimited)', style: TextStyle(color: Colors.greenAccent)),
+            ListTile(
+              leading: Icon(
+                entitlement.isActive
+                    ? Icons.verified_rounded
+                    : (entitlement.isExpired ? Icons.cancel_outlined : Icons.timer_outlined),
+                color: entitlement.isActive
+                    ? Colors.greenAccent
+                    : (entitlement.isExpired ? Colors.redAccent : Colors.amberAccent),
+              ),
+              title: const Text('License Status', style: TextStyle(color: Colors.white)),
+              subtitle: Text(
+                entitlement.formattedStatusBadge,
+                style: TextStyle(
+                  color: entitlement.isActive
+                      ? Colors.greenAccent
+                      : (entitlement.isExpired ? Colors.redAccent : Colors.amberAccent),
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              trailing: Text(
+                entitlement.remotePlaylistsCount > 0
+                    ? '${entitlement.remotePlaylistsCount} cloud synced'
+                    : 'Cloud sync active',
+                style: const TextStyle(color: Colors.white38, fontSize: 12),
+              ),
             ),
             const Divider(color: Color(0xFF26243A), height: 1),
 
-            // App Version & Update
+            // App Version
             ListTile(
               leading: const Icon(Icons.system_update_rounded, color: Colors.white70),
               title: const Text('App Version', style: TextStyle(color: Colors.white)),
               subtitle: Text('YesXtream v${AppUpdateService.currentVersion}',
                   style: const TextStyle(color: Colors.white54)),
-              trailing: FilledButton(
-                onPressed: () => _checkForUpdates(context),
-                style: FilledButton.styleFrom(backgroundColor: const Color(0xFF6C5CE7)),
-                child: const Text('Check Update'),
-              ),
             ),
           ],
         ),
@@ -1025,117 +1058,6 @@ class _SettingsCard extends StatelessWidget {
 // ──────────────────────────────────────────
 // Preserved Helper Tiles & Screens
 // ──────────────────────────────────────────
-
-Future<void> _checkForUpdates(BuildContext context) async {
-  showDialog(
-    context: context,
-    barrierDismissible: false,
-    builder: (_) => const Center(child: CircularProgressIndicator()),
-  );
-
-  final release = await AppUpdateService.checkForUpdate();
-
-  if (!context.mounted) return;
-  Navigator.of(context).pop();
-
-  if (release == null) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      countdownSnackBar('Could not check for updates', seconds: 5),
-    );
-    return;
-  }
-
-  if (!release.isNewer) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      countdownSnackBar(
-        'You\'re up to date! (v${AppUpdateService.currentVersion})',
-        seconds: 5,
-      ),
-    );
-    return;
-  }
-
-  final action = await showDialog<String>(
-    context: context,
-    builder: (ctx) => AlertDialog(
-      backgroundColor: const Color(0xFF1A1A2E),
-      title: Text('Update Available — v${release.version}'),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Current: v${AppUpdateService.currentVersion}\n'
-            'Latest: v${release.version}\n',
-          ),
-          if (release.body.isNotEmpty)
-            Text(
-              release.body.length > 300 ? '${release.body.substring(0, 300)}…' : release.body,
-              style: const TextStyle(fontSize: 13, color: Colors.white70),
-            ),
-        ],
-      ),
-      actions: [
-        TextButton(onPressed: () => Navigator.pop(ctx, 'later'), child: const Text('Later')),
-        if (release.apkDownloadUrl != null)
-          FilledButton.icon(
-            onPressed: () => Navigator.pop(ctx, 'install'),
-            icon: const Icon(Icons.download, size: 18),
-            label: const Text('Download & Install'),
-          ),
-      ],
-    ),
-  );
-
-  if (action == 'install' && release.apkDownloadUrl != null && context.mounted) {
-    _downloadUpdate(context, release.apkDownloadUrl!);
-  }
-}
-
-Future<void> _downloadUpdate(BuildContext context, String apkUrl) async {
-  double progress = 0;
-  late StateSetter dialogSetState;
-
-  showDialog(
-    context: context,
-    barrierDismissible: false,
-    builder: (ctx) => StatefulBuilder(
-      builder: (ctx, setState) {
-        dialogSetState = setState;
-        return AlertDialog(
-          backgroundColor: const Color(0xFF1A1A2E),
-          title: const Text('Downloading Update…'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              LinearProgressIndicator(value: progress),
-              const SizedBox(height: 12),
-              Text('${(progress * 100).toStringAsFixed(0)}%'),
-            ],
-          ),
-        );
-      },
-    ),
-  );
-
-  await AppUpdateService.downloadAndInstall(
-    apkUrl,
-    onProgress: (p) {
-      try {
-        dialogSetState(() => progress = p);
-      } catch (_) {}
-    },
-    onError: (error) {
-      if (context.mounted) {
-        Navigator.of(context).pop();
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(error), backgroundColor: Colors.red),
-        );
-      }
-    },
-  );
-  if (context.mounted) Navigator.of(context).pop();
-}
 
 class _AutoRefreshTile extends StatefulWidget {
   @override
