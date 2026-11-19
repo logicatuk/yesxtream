@@ -1,7 +1,14 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <base href="$FLUTTER_BASE_HREF">
+  <script>
+    // Smart TV packaged apps (file:// on LG webOS / Samsung Tizen) must use relative base
+    if (window.location.protocol === 'file:') {
+      document.write('<base href="./">');
+    } else {
+      document.write('<base href="$FLUTTER_BASE_HREF">');
+    }
+  </script>
 
   <meta charset="UTF-8">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
@@ -21,7 +28,14 @@
   <link rel="manifest" href="manifest.json">
 
   <!-- Samsung Tizen WebAPI Loader (injected by Tizen OS on Samsung TVs) -->
-  <script type="text/javascript" src="$WEBAPIS/webapis/webapis.js"></script>
+  <script type="text/javascript">
+    if (typeof window.tizen !== 'undefined' || (navigator.userAgent && navigator.userAgent.indexOf('Tizen') !== -1)) {
+      var tizenScript = document.createElement('script');
+      tizenScript.type = 'text/javascript';
+      tizenScript.src = '$WEBAPIS/webapis/webapis.js';
+      document.head.appendChild(tizenScript);
+    }
+  </script>
 
   <style>
     body, html {

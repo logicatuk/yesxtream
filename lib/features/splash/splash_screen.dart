@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -20,6 +21,7 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
   late final AnimationController _controller;
   // Glow controller only created on non-TV platforms
   AnimationController? _glowController;
+  Timer? _fallbackTimer;
 
   // Staggered animations driven by _controller (0→1 over 3s)
   late final Animation<double> _iconScale;
@@ -132,21 +134,40 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
 
     _controller.forward();
     _controller.addStatusListener((status) {
-      if (status == AnimationStatus.completed && mounted) {
-        final startup = ref.read(appSettingsProvider).startupPage;
-        if (startup == 'Live TV' || startup == 'Live') {
-          context.go('/live');
-        } else if (startup == 'Movies') {
-          context.go('/movies');
-        } else {
-          context.go('/home');
-        }
+      if (status == AnimationStatus.completed) {
+        _navigateToInitialPage();
       }
     });
+
+    // Safety fallback: ensure TV never gets stuck on splash screen if frames drop
+    _fallbackTimer = Timer(Duration(milliseconds: _isTV ? 500 : 3500), () {
+      _navigateToInitialPage();
+    });
+  }
+
+  bool _navigated = false;
+  void _navigateToInitialPage() {
+    if (_navigated || !mounted) return;
+    _navigated = true;
+    try {
+      final startup = ref.read(appSettingsProvider).startupPage;
+      if (startup == 'Live TV' || startup == 'Live') {
+        context.go('/live');
+      } else if (startup == 'Movies') {
+        context.go('/movies');
+      } else {
+        context.go('/home');
+      }
+    } catch (_) {
+      if (mounted) {
+        context.go('/home');
+      }
+    }
   }
 
   @override
   void dispose() {
+    _fallbackTimer?.cancel();
     _controller.dispose();
     _glowController?.dispose();
     super.dispose();

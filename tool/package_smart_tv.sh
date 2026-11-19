@@ -40,6 +40,9 @@ rm -f build/webos_app/config.xml
 if command -v ares-package >/dev/null 2>&1; then
   ares-package --no-minify build/webos_app -o build/
   echo "==> Built LG webOS IPK in build/ via ares-package"
+elif npx --no-install ares-package -V >/dev/null 2>&1 || npx ares-package -V >/dev/null 2>&1; then
+  npx ares-package --no-minify build/webos_app -o build/
+  echo "==> Built LG webOS IPK in build/ via npx ares-package"
 else
   echo "==> 'ares-package' not found; staged webOS bundle at build/webos_app/ (install @webosose/ares-cli to package .ipk)"
 fi
